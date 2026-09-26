@@ -29,6 +29,7 @@ export default function UserManagementPage() {
   const [isLoadingRequests, setIsLoadingRequests] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusIsError, setStatusIsError] = useState(false);
+  const [emailConfirmationUserId, setEmailConfirmationUserId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -98,6 +99,26 @@ export default function UserManagementPage() {
     } catch (error) {
       setStatusIsError(true);
       setStatusMessage(error instanceof Error ? error.message : 'Unable to reject this access request.');
+    }
+  };
+
+  const handleConfirmEmail = async (user: Profile) => {
+    setEmailConfirmationUserId(user.id);
+    try {
+      const response = await fetch('/api/admin/confirm-approved-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) throw new Error(result.error || 'Unable to confirm this account email.');
+      setStatusIsError(false);
+      setStatusMessage(`Email confirmed for ${user.full_name}. They can now sign in.`);
+    } catch (error) {
+      setStatusIsError(true);
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to confirm this account email.');
+    } finally {
+      setEmailConfirmationUserId(null);
     }
   };
 
@@ -231,6 +252,7 @@ export default function UserManagementPage() {
                   <th className="p-4">User Name</th>
                   <th className="p-4">Department</th>
                   <th className="p-4">Status</th>
+                  <th className="p-4">Email Confirmation</th>
                   <th className="p-4">Current Role</th>
                   <th className="p-4">Change Role (Backend API)</th>
                   {currentAdmin?.is_super_admin && <th className="p-4">Account</th>}
@@ -259,6 +281,24 @@ export default function UserManagementPage() {
                         <span className="inline-flex items-center text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                           <Clock className="w-3 h-3 mr-1" />
                           Pending
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-4">
+                      {u.is_verified && (u.role === 'student' || u.role === 'faculty') ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleConfirmEmail(u)}
+                          disabled={emailConfirmationUserId !== null}
+                          title="Confirm email for this already-approved account"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Mail className="h-3.5 w-3.5" />
+                          {emailConfirmationUserId === u.id ? 'Confirming...' : 'Confirm Email'}
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">
+                          {u.role === 'admin' ? 'Not required' : 'Available after approval'}
                         </span>
                       )}
                     </td>
