@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRole } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { assessmentAudienceMismatch, assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 import { getAssessmentDeadline, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
 import type { Question } from '@/lib/types';
@@ -16,7 +17,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const supabase = await createClient();
-    const { data: test, error: testError } = await supabase
+    const adminSupabase = createAdminClient();
+    const { data: test, error: testError } = await adminSupabase
       .from('tests')
       .select('*')
       .eq('id', testId)
@@ -55,13 +57,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const now = Date.now();
     const hardDeadline = getAssessmentDeadline(attempt.started_at, test.duration_minutes, test.end_time!);
     const submissionStatus = now >= hardDeadline ? 'auto_submitted' : 'submitted';
-    const { data: assignedQuestionRows, error: assignedQuestionsError } = await supabase
+    const { data: assignedQuestionRows, error: assignedQuestionsError } = await adminSupabase
       .from('test_questions')
       .select('question_id')
       .eq('test_id', testId);
     if (assignedQuestionsError) throw assignedQuestionsError;
     const assignedQuestionIds = new Set((assignedQuestionRows || []).map((row) => row.question_id));
-    const { data: questionRows, error: questionsError } = await supabase.from('questions').select('*');
+    const { data: questionRows, error: questionsError } = await adminSupabase.from('questions').select('*');
     if (questionsError) throw questionsError;
     const allQuestions = ((questionRows || []) as Question[])
       .filter((question) => questionMatchesStudent(question, student.department, student.academic_year || student.year_of_study))

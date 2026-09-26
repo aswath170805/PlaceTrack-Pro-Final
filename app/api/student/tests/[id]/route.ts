@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Question } from '@/lib/types';
 import { requireRole } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { assessmentAudienceMismatch, assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 import { formatAssessmentTimeIST, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
 
@@ -20,7 +21,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id: testId } = await params;
     const student = await requireRole(['student']);
     const supabase = await createClient();
-    const { data: test, error: testError } = await supabase
+    const adminSupabase = createAdminClient();
+    const { data: test, error: testError } = await adminSupabase
       .from('tests')
       .select('*')
       .eq('id', testId)
@@ -43,7 +45,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ success: false, error: 'The assessment window has ended.' }, { status: 410 });
     }
 
-    const { data: testQuestionRows, error: testQuestionError } = await supabase
+    const { data: testQuestionRows, error: testQuestionError } = await adminSupabase
       .from('test_questions')
       .select('question_id')
       .eq('test_id', testId);
@@ -56,7 +58,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { error: attendanceError } = await supabase.from('attendance_logs').insert({ student_id: student.id, entry_type: 'assessment_entry' });
     if (attendanceError) throw attendanceError;
 
-    const { data: questionRows, error: questionsError } = await supabase.from('questions').select('*');
+    const { data: questionRows, error: questionsError } = await adminSupabase.from('questions').select('*');
     if (questionsError) throw questionsError;
     const questions = ((questionRows || []) as Question[])
       .filter((question) => questionMatchesStudent(question, student.department, student.academic_year || student.year_of_study))

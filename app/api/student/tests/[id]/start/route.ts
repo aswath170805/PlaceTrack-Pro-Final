@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { Question } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { requireRole } from '@/lib/supabase/auth';
 import { assessmentAudienceMismatch, assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 import { formatAssessmentTimeIST, getAssessmentDeadline, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
@@ -10,7 +11,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id: assessmentId } = await params;
     const student = await requireRole(['student']);
     const supabase = await createClient();
-    const { data: test, error: testError } = await supabase
+    const adminSupabase = createAdminClient();
+    const { data: test, error: testError } = await adminSupabase
       .from('tests')
       .select('*')
       .eq('id', assessmentId)
@@ -34,13 +36,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ success: false, error: 'The assessment window has ended.' }, { status: 410 });
     }
 
-    const { data: assignedRows, error: assignedError } = await supabase
+    const { data: assignedRows, error: assignedError } = await adminSupabase
       .from('test_questions')
       .select('question_id')
       .eq('test_id', assessmentId);
     if (assignedError) throw assignedError;
     const assignedQuestionIds = new Set((assignedRows || []).map((row) => row.question_id));
-    const { data: questionRows, error: questionsError } = await supabase.from('questions').select('*');
+    const { data: questionRows, error: questionsError } = await adminSupabase.from('questions').select('*');
     if (questionsError) throw questionsError;
     const eligibleQuestions = ((questionRows || []) as Question[])
       .filter((question) => assignedQuestionIds.has(question.id))
