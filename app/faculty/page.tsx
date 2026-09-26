@@ -17,7 +17,6 @@ import {
   FileText,
   Award,
   ShieldAlert,
-  ChevronRight,
   Sparkles,
   Layers
 } from 'lucide-react';
@@ -487,37 +486,6 @@ export default function FacultyDashboard() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </div>
-
-        {/* Assigned Batches Overview */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
-            <div>
-              <h3 className="text-base font-black text-slate-900">Batch Readiness & Performance</h3>
-              <p className="text-xs text-slate-500">Assigned student cohort breakdown</p>
-            </div>
-            <span className="text-xs text-slate-500 font-medium">Batch Roster</span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {batches.map((b) => (
-              <div key={b.id} className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 relative group">
-                <div className="flex justify-between items-start">
-                  <h4 className="font-bold text-slate-900 text-sm">{b.name}</h4>
-                  <span className="text-[11px] bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded">
-                    {b.student_count ?? 0} Students
-                  </span>
-                </div>
-                <Link
-                  href="/faculty/attendance"
-                  className="w-full py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-xl transition-colors flex items-center justify-center"
-                >
-                  <span>Review Batch Attendance</span>
-                  <ChevronRight className="w-3.5 h-3.5 ml-1" />
-                </Link>
-              </div>
-            ))}
           </div>
         </div>
 

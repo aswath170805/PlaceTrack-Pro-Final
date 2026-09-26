@@ -8,7 +8,6 @@ import { Test, TestAttempt, TestAttempt as AttemptType } from '@/lib/types';
 import { assessmentMatchesStudent } from '@/lib/assessmentTargeting';
 import { formatAssessmentTimeIST, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
 import { 
-  Play, 
   Clock, 
   CheckCircle2, 
   ShieldAlert, 
@@ -43,8 +42,7 @@ export default function StudentDashboard() {
   const averageScore = completedAttempts.length
     ? Math.round(completedAttempts.reduce((total, attempt) => total + Number(attempt.score || 0), 0) / completedAttempts.length)
     : 0;
-  const dailyPracticeTest = allocatedTests.find((t) => t.type === 'daily_practice');
-  const weeklyTests = allocatedTests.filter((t) => t.type === 'weekly_assessment');
+  const studentAssessments = allocatedTests;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
@@ -76,8 +74,8 @@ export default function StudentDashboard() {
               <span className="text-[11px] text-slate-300 font-medium">Daily Streak</span>
             </div>
             <div className="text-center px-3">
-              <span className="block text-2xl font-black text-amber-400">{weeklyTests.length}</span>
-              <span className="text-[11px] text-slate-300 font-medium">Active Mocks</span>
+              <span className="block text-2xl font-black text-amber-400">{studentAssessments.length}</span>
+              <span className="text-[11px] text-slate-300 font-medium">Available Assessments</span>
             </div>
           </div>
         </div>
@@ -86,76 +84,27 @@ export default function StudentDashboard() {
       {/* Main Dashboard Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 space-y-8">
         
-        {/* Daily Practice & Urgent Assessments Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Daily Practice Action Card */}
-          {dailyPracticeTest && (
-            <div className="lg:col-span-1 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col justify-between hover:shadow-md transition-shadow relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-full -mr-8 -mt-8 pointer-events-none" />
-              <div>
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
-                    <span className="px-2.5 py-1 bg-blue-100 text-blue-700 font-semibold text-xs rounded-lg uppercase tracking-wider">
-                      Daily Practice Set
-                    </span>
-                    {dailyPracticeTest.target_department && dailyPracticeTest.target_department !== 'All Departments' && (
-                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 font-bold text-[10px] rounded">
-                        {dailyPracticeTest.target_department}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-slate-400 font-mono flex items-center">
-                    <Clock className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                    {dailyPracticeTest.duration_minutes} mins
-                  </span>
-                </div>
-                <h3 className="text-lg font-bold text-slate-900 mb-2">
-                  {dailyPracticeTest.title}
-                </h3>
-                <p className="text-xs text-slate-500 mb-4">
-                  Topic focus: Data Structures, Aptitude, Core OS. Build consistency with quick curated questions.
-                </p>
-              </div>
-
-              {getAssessmentWindowStatus(dailyPracticeTest) === 'open' ? (
-                <Link
-                  href={`/student/tests/${dailyPracticeTest.id}`}
-                  className="w-full inline-flex items-center justify-center px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-sm transition-all shadow-sm shadow-blue-500/20 group"
-                >
-                  <Play className="w-4 h-4 mr-2 group-hover:scale-110 transition-transform" />
-                  Start Daily Practice
-                </Link>
-              ) : (
-                <button type="button" disabled className="w-full inline-flex items-center justify-center px-4 py-3 bg-slate-200 text-slate-500 font-semibold rounded-xl text-sm cursor-not-allowed">
-                  {getAssessmentWindowStatus(dailyPracticeTest) === 'upcoming'
-                    ? `Opens ${formatAssessmentTimeIST(dailyPracticeTest.start_time)}`
-                    : getAssessmentWindowStatus(dailyPracticeTest) === 'closed' ? 'Practice window closed' : 'Not scheduled'}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Scheduled Mock Assessments List */}
-          <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+        {/* All assessments allocated to the student */}
+        <div className="grid grid-cols-1 gap-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
             <div className="flex justify-between items-center mb-4">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Scheduled Mock Assessments</h3>
-                <p className="text-xs text-slate-500">Proctored tests allocated to your branch & year</p>
+                <h3 className="text-base font-bold text-slate-900">Your Assessments</h3>
+                <p className="text-xs text-slate-500">Daily practice, weekly assessments, and custom exams for your department and year</p>
               </div>
                 <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">
                 Assessment Windows
               </span>
             </div>
 
-            {weeklyTests.length === 0 ? (
+            {studentAssessments.length === 0 ? (
               <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                <p className="text-sm font-medium text-slate-600">No mock assessments currently scheduled for {userDept} - {userYear}.</p>
-                <p className="text-xs text-slate-400 mt-1">Check back soon or practice with the daily assessment set!</p>
+                <p className="text-sm font-medium text-slate-600">No assessments are currently allocated to {userDept} - {userYear}.</p>
+                <p className="text-xs text-slate-400 mt-1">Assessments appear here when their department/year audience matches your student profile.</p>
               </div>
             ) : (
               <div className="space-y-4">
-                {weeklyTests.map((test) => (
+                {studentAssessments.map((test) => (
                   <div 
                     key={test.id}
                     className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 hover:bg-blue-50/50 rounded-xl border border-slate-200/80 transition-all gap-4"
@@ -163,6 +112,9 @@ export default function StudentDashboard() {
                     <div className="space-y-1">
                       <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                         <span className="font-bold text-slate-900 text-sm">{test.title}</span>
+                        <span className="inline-flex items-center text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded uppercase">
+                          {test.type.replaceAll('_', ' ')}
+                        </span>
                         {test.target_department && test.target_department !== 'All Departments' && (
                           <span className="inline-flex items-center text-[10px] font-bold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">
                             {test.target_department}
@@ -208,7 +160,6 @@ export default function StudentDashboard() {
               </div>
             )}
           </div>
-
         </div>
 
         {/* Analytics & Performance Teaser Row */}
