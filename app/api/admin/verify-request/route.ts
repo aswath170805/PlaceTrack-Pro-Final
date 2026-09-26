@@ -1,64 +1,68 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-
-async function validateAdmin(requesterId: string): Promise<boolean> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
-    return requesterId === 'a3333333-3333-3333-3333-333333333333';
-  }
-
-  try {
-    const supabase = createAdminClient();
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('role, is_verified')
-      .eq('id', requesterId)
-      .single();
-    if (error || !data) return false;
-    return data.role === 'admin' && data.is_verified === true;
-  } catch (e) {
-    console.error('validateAdmin DB error:', e);
-    return requesterId === 'a3333333-3333-3333-3333-333333333333';
-  }
-}
+import { requireRole } from '@/lib/supabase/auth';
 
 export async function POST(req: Request) {
   try {
-    const { requestId, userId, status, reason, reviewerId } = await req.json();
-
-    if (!reviewerId || !(await validateAdmin(reviewerId))) {
-      return NextResponse.json(
-        { success: false, error: 'Access Denied: Reviewer must be a verified Administrator!' },
-        { status: 403 }
-      );
+    const reviewer = await requireRole(['admin']);
+    const { requestId, userId, status, reason } = await req.json();
+    if (!requestId || !userId || !['approved', 'rejected'].includes(status)) {
+      return NextResponse.json({ success: false, error: 'A request, user, and valid review status are required.' }, { status: 400 });
     }
 
     const supabase = createAdminClient();
     const isApproved = status === 'approved';
 
-    // 1. Update verification requests table
-    const { error: reqError } = await supabase
+    const { data: requestRecord, error: requestLookupError } = await supabase
+      .from('verification_requests')
+      .select('id, user_id, status')
+      .eq('id', requestId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (requestLookupError) throw requestLookupError;
+    if (!requestRecord) return NextResponse.json({ success: false, error: 'Access request was not found.' }, { status: 404 });
+    if (requestRecord.status !== 'pending') {
+      return NextResponse.json({ success: false, error: 'This access request has already been reviewed.' }, { status: 409 });
+    }
+
+    const { data: profileBefore, error: profileLookupError } = await supabase
+      .from('profiles')
+      .select('id, is_verified')
+      .eq('id', userId)
+      .maybeSingle();
+    if (profileLookupError) throw profileLookupError;
+    if (!profileBefore) return NextResponse.json({ success: false, error: 'The account profile was not found.' }, { status: 404 });
+
+    // Update the profile first; only report approval if both records are confirmed.
+    const { data: updatedProfile, error: profileError } = await supabase
+      .from('profiles')
+      .update({ is_verified: isApproved })
+      .eq('id', userId)
+      .select('id')
+      .maybeSingle();
+    if (profileError) throw profileError;
+    if (!updatedProfile) return NextResponse.json({ success: false, error: 'The account profile could not be updated.' }, { status: 404 });
+
+    const { data: updatedRequest, error: reqError } = await supabase
       .from('verification_requests')
       .update({
         status: status,
         rejection_reason: isApproved ? null : reason || 'Access request rejected by Placement Admin.',
         reviewed_at: new Date().toISOString(),
-        reviewed_by: reviewerId,
+        reviewed_by: reviewer.id,
       })
-      .eq('id', requestId);
+      .eq('id', requestId)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle();
 
     if (reqError) {
+      await supabase.from('profiles').update({ is_verified: profileBefore.is_verified }).eq('id', userId);
       throw reqError;
     }
-
-    // 2. Update user profile verification status
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({ is_verified: isApproved })
-      .eq('id', userId);
-
-    if (profileError) {
-      throw profileError;
+    if (!updatedRequest) {
+      await supabase.from('profiles').update({ is_verified: profileBefore.is_verified }).eq('id', userId);
+      return NextResponse.json({ success: false, error: 'This access request was reviewed by another admin.' }, { status: 409 });
     }
 
     // Fetch user name for auditing
@@ -71,7 +75,7 @@ export async function POST(req: Request) {
     // 3. Log audit entry
     await supabase.from('audit_logs').insert([
       {
-        actor_id: reviewerId,
+        actor_id: reviewer.id,
         actor_name: 'Placement Admin',
         action: isApproved ? 'APPROVE_USER_VERIFICATION' : 'REJECT_USER_VERIFICATION',
         target_table: 'verification_requests',
@@ -87,6 +91,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true });
   } catch (err: any) {
     console.error('API verify-request error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: err.message === 'UNAUTHORIZED' ? 401 : 500 });
   }
 }

@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
-  MOCK_QUESTION_BANKS, 
-  MOCK_QUESTIONS, 
   QuestionBank, 
   Question 
-} from '@/lib/mockData';
+} from '@/lib/types';
+import { DatabaseService } from '@/lib/dbService';
+import { useAuth } from '@/lib/authContext';
 import { 
   BookOpen, 
   PlusCircle, 
@@ -25,21 +25,19 @@ import {
 } from 'lucide-react';
 
 export default function QuestionBanksPage() {
-  const [banks, setBanks] = useState<QuestionBank[]>(MOCK_QUESTION_BANKS);
-  const [questions, setQuestions] = useState<Question[]>(MOCK_QUESTIONS);
-  const [selectedBankId, setSelectedBankId] = useState<string>(MOCK_QUESTION_BANKS[0].id);
+  const { user } = useAuth();
+  const [banks, setBanks] = useState<QuestionBank[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [selectedBankId, setSelectedBankId] = useState<string>('');
+  const [isLoadingBanks, setIsLoadingBanks] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // New Question Bank Modal state
   const [showBankModal, setShowBankModal] = useState<boolean>(false);
   const [newBankTitle, setNewBankTitle] = useState<string>('');
   const [newBankTopic, setNewBankTopic] = useState<string>('');
-  const [newBankDept, setNewBankDept] = useState<string>('All Departments');
-  const [newBankYear, setNewBankYear] = useState<string>('All Years');
-
-  // PDF upload modal state
-  const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
-  const [pdfFileName, setPdfFileName] = useState<string>('');
-  const [pdfUploadStatus, setPdfUploadStatus] = useState<string | null>(null);
+  const [newBankDept, setNewBankDept] = useState<string>('CSE');
+  const [newBankYear, setNewBankYear] = useState<string>('1st');
 
   // Question Modal state (Create & Edit)
   const [showQModal, setShowQModal] = useState<boolean>(false);
@@ -48,8 +46,8 @@ export default function QuestionBanksPage() {
   const [qText, setQText] = useState<string>('');
   const [qTopic, setQTopic] = useState<string>('Data Structures');
   const [qDifficulty, setQDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
-  const [qDept, setQDept] = useState<string>('All Departments');
-  const [qYear, setQYear] = useState<string>('All Years');
+  const [qDept, setQDept] = useState<string>('CSE');
+  const [qYear, setQYear] = useState<string>('1st');
   const [mcqOptions, setMcqOptions] = useState<string[]>(['Option A', 'Option B', 'Option C', 'Option D']);
   const [mcqCorrect, setMcqCorrect] = useState<number>(0);
   const [starterCode, setStarterCode] = useState<string>('function solution(nums, target) {\n  // Implement logic\n}');
@@ -62,34 +60,42 @@ export default function QuestionBanksPage() {
   const activeBank = banks.find((b) => b.id === selectedBankId) || banks[0];
   const bankQuestions = questions.filter((q) => q.bank_id === selectedBankId);
 
-  const handleCreateBank = (e: React.FormEvent) => {
+  useEffect(() => {
+    let isActive = true;
+    Promise.all([DatabaseService.getQuestionBanks(), DatabaseService.getQuestions()]).then(([loadedBanks, loadedQuestions]) => {
+      if (!isActive) return;
+      setBanks(loadedBanks);
+      setQuestions(loadedQuestions);
+      if (loadedBanks.length > 0) setSelectedBankId(loadedBanks[0].id);
+      setLoadError(null);
+    }).catch((error) => {
+      if (isActive) setLoadError(error instanceof Error ? error.message : 'Unable to load question banks.');
+    }).finally(() => {
+      if (isActive) setIsLoadingBanks(false);
+    });
+    return () => { isActive = false; };
+  }, []);
+
+  const handleCreateBank = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newB: QuestionBank = {
-      id: 'qb-' + Math.random().toString(36).substring(2, 7),
-      title: newBankTitle,
-      topic: newBankTopic,
-      target_department: newBankDept,
-      target_year: newBankYear,
-      question_count: 0,
-      created_by: 'Faculty User',
-    };
-    setBanks([...banks, newB]);
+    const newB = await DatabaseService.createQuestionBank(newBankTitle, newBankTopic, user?.id || '', newBankDept, newBankYear);
+    setBanks((previous) => [...previous, newB]);
     setSelectedBankId(newB.id);
     setShowBankModal(false);
     setNewBankTitle('');
     setNewBankTopic('');
-    setNewBankDept('All Departments');
-    setNewBankYear('All Years');
+    setNewBankDept('CSE');
+    setNewBankYear('1st');
   };
 
   const handleOpenAddQuestion = () => {
     setEditingQuestionId(null);
     setQType('mcq');
     setQText('');
-    setQTopic(activeBank.topic || 'General');
+    setQTopic(activeBank?.topic || 'General');
     setQDifficulty('medium');
-    setQDept(activeBank.target_department || 'All Departments');
-    setQYear(activeBank.target_year || 'All Years');
+    setQDept(['CSE', 'AI', 'EEE', 'ECE', 'IT'].includes(activeBank?.target_department || '') ? activeBank!.target_department! : 'CSE');
+    setQYear(['1st', '2nd', '3rd', '4th'].includes(activeBank?.target_year || '') ? activeBank!.target_year! : '1st');
     setMcqOptions(['Option A', 'Option B', 'Option C', 'Option D']);
     setMcqCorrect(0);
     setStarterCode('function solution() {\n  // Code here\n}');
@@ -106,8 +112,8 @@ export default function QuestionBanksPage() {
     setQText(q.content.questionText);
     setQTopic(q.topic);
     setQDifficulty(q.difficulty);
-    setQDept(q.target_department || activeBank.target_department || 'All Departments');
-    setQYear(q.target_year || activeBank.target_year || 'All Years');
+    setQDept(['CSE', 'AI', 'EEE', 'ECE', 'IT'].includes(q.target_department || activeBank?.target_department || '') ? (q.target_department || activeBank?.target_department)! : 'CSE');
+    setQYear(['1st', '2nd', '3rd', '4th'].includes(q.target_year || activeBank?.target_year || '') ? (q.target_year || activeBank?.target_year)! : '1st');
     if (q.type === 'mcq') {
       setMcqOptions(q.content.options || ['Option A', 'Option B', 'Option C', 'Option D']);
       setMcqCorrect(typeof q.content.correctAnswer === 'number' ? q.content.correctAnswer : 0);
@@ -128,35 +134,31 @@ export default function QuestionBanksPage() {
     setQuestions(questions.filter((q) => q.id !== id));
   };
 
-  const handleSaveQuestion = (e: React.FormEvent) => {
+  const handleSaveQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (editingQuestionId) {
-      // Edit existing
-      setQuestions(questions.map((q) => {
-        if (q.id === editingQuestionId) {
-          return {
-            ...q,
-            type: qType,
-            topic: qTopic,
-            difficulty: qDifficulty,
-            target_department: qDept,
-            target_year: qYear,
-            content: {
-              ...q.content,
-              questionText: qText,
-              options: qType === 'mcq' ? mcqOptions : undefined,
-              correctAnswer: qType === 'mcq' ? mcqCorrect : undefined,
-              starterCode: qType === 'coding' ? starterCode : undefined,
-              testCases: qType === 'coding' ? testCases : undefined,
-            }
-          };
-        }
-        return q;
-      }));
+      const existingQuestion = questions.find((question) => question.id === editingQuestionId);
+      if (!existingQuestion) return;
+      const updatedQuestion = {
+        ...existingQuestion,
+        type: qType,
+        topic: qTopic,
+        difficulty: qDifficulty,
+        target_department: qDept,
+        target_year: qYear,
+        content: {
+          ...existingQuestion.content,
+          questionText: qText,
+          options: qType === 'mcq' ? mcqOptions : undefined,
+          correctAnswer: qType === 'mcq' ? mcqCorrect : undefined,
+          starterCode: qType === 'coding' ? starterCode : undefined,
+          testCases: qType === 'coding' ? testCases : undefined,
+        },
+      };
+      const savedQuestion = await DatabaseService.updateQuestion(updatedQuestion);
+      setQuestions((previous) => previous.map((question) => question.id === editingQuestionId ? savedQuestion : question));
     } else {
-      // Create new
-      const newQ: Question = {
-        id: 'q-' + Math.random().toString(36).substring(2, 7),
+      const newQ = await DatabaseService.createQuestion({
         bank_id: selectedBankId,
         type: qType,
         topic: qTopic,
@@ -170,9 +172,8 @@ export default function QuestionBanksPage() {
           starterCode: qType === 'coding' ? starterCode : undefined,
           testCases: qType === 'coding' ? testCases : undefined,
         },
-        created_at: new Date().toISOString(),
-      };
-      setQuestions([newQ, ...questions]);
+      });
+      setQuestions((previous) => [newQ, ...previous]);
     }
     setShowQModal(false);
   };
@@ -185,38 +186,20 @@ export default function QuestionBanksPage() {
     setTestCases(testCases.filter((_, idx) => idx !== index));
   };
 
-  const handleUploadPdfSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPdfUploadStatus('Processing PDF with AI extraction...');
-    setTimeout(() => {
-      const parsedQ: Question = {
-        id: 'q-pdf-' + Date.now(),
-        bank_id: selectedBankId,
-        type: 'mcq',
-        topic: activeBank.topic,
-        difficulty: 'medium',
-        content: {
-          questionText: 'Extracted from PDF: What is the primary purpose of Virtual Memory in operating systems?',
-          options: [
-            'To extend RAM using disk storage and provide isolation',
-            'To speed up CPU clock cycles',
-            'To replace physical hard disks completely',
-            'To encrypt system files'
-          ],
-          correctAnswer: 0,
-          explanation: 'Virtual memory allows addressing beyond physical RAM capacity while protecting process address spaces.'
-        },
-        created_at: new Date().toISOString()
-      };
-      setQuestions([parsedQ, ...questions]);
-      setPdfUploadStatus('Successfully parsed and imported 1 question into this Question Bank!');
-      setTimeout(() => {
-        setShowPdfModal(false);
-        setPdfUploadStatus(null);
-        setPdfFileName('');
-      }, 1200);
-    }, 1000);
-  };
+  if (isLoadingBanks) return <div className="min-h-screen p-10 text-sm text-slate-500">Loading saved question banks...</div>;
+  if (!activeBank) return (
+    <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6">
+      <div className="mx-auto max-w-xl space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+        <h1 className="text-xl font-black text-slate-900">Create a question bank</h1>
+        {loadError && <p role="alert" className="text-xs text-red-700">{loadError}</p>}
+        <form onSubmit={handleCreateBank} className="space-y-3">
+          <input required value={newBankTitle} onChange={(event) => setNewBankTitle(event.target.value)} placeholder="Bank title" className="w-full rounded-lg border border-slate-300 p-2 text-sm" />
+          <input required value={newBankTopic} onChange={(event) => setNewBankTopic(event.target.value)} placeholder="Topic" className="w-full rounded-lg border border-slate-300 p-2 text-sm" />
+          <button type="submit" className="rounded-lg bg-indigo-700 px-4 py-2 text-sm font-bold text-white">Create bank</button>
+        </form>
+      </div>
+    </main>
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4 sm:px-6 lg:px-8">
@@ -231,18 +214,11 @@ export default function QuestionBanksPage() {
             </div>
             <h1 className="text-2xl font-black text-slate-900">Manage Question Banks & Challenges</h1>
             <p className="text-xs text-slate-500">
-              Create, edit, and organize MCQs, coding challenges with public/private test cases, or upload PDF question papers
+              Create and manage saved MCQs and coding questions with routed department/year assignments.
             </p>
           </div>
 
           <div className="flex items-center space-x-3">
-            <button
-              onClick={() => setShowPdfModal(true)}
-              className="inline-flex items-center px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors border border-slate-300"
-            >
-              <Upload className="w-4 h-4 mr-1.5 text-indigo-600" />
-              Upload PDF Questions
-            </button>
             <button
               onClick={() => setShowBankModal(true)}
               className="inline-flex items-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors"
@@ -477,13 +453,11 @@ export default function QuestionBanksPage() {
                   onChange={(e) => setNewBankDept(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                 >
-                  <option value="All Departments">All Departments</option>
-                  <option value="AIDS">AIDS</option>
                   <option value="CSE">CSE</option>
-                  <option value="ECE">ECE</option>
+                  <option value="AI">AI</option>
                   <option value="EEE">EEE</option>
-                  <option value="MECH">MECH</option>
-                  <option value="BIOTECH">BIOTECH</option>
+                  <option value="ECE">ECE</option>
+                  <option value="IT">IT</option>
                 </select>
               </div>
               <div>
@@ -493,11 +467,10 @@ export default function QuestionBanksPage() {
                   onChange={(e) => setNewBankYear(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                 >
-                  <option value="All Years">All Years</option>
-                  <option value="1st Year">1st Year</option>
-                  <option value="2nd Year">2nd Year</option>
-                  <option value="3rd Year">3rd Year</option>
-                  <option value="4th Year">4th Year</option>
+                  <option value="1st">1st</option>
+                  <option value="2nd">2nd</option>
+                  <option value="3rd">3rd</option>
+                  <option value="4th">4th</option>
                 </select>
               </div>
             </div>
@@ -515,59 +488,6 @@ export default function QuestionBanksPage() {
                 className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md"
               >
                 Create Bank
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* PDF Upload Modal */}
-      {showPdfModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <form onSubmit={handleUploadPdfSubmit} className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                <Upload className="w-4 h-4" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900">Upload PDF Question Paper</h3>
-            </div>
-            
-            <p className="text-xs text-slate-500">
-              Upload your question document to automatically import questions into <strong>{activeBank.title}</strong>.
-            </p>
-
-            <div className="p-6 border-2 border-dashed border-indigo-200 rounded-2xl bg-indigo-50/50 text-center space-y-2">
-              <FileText className="w-8 h-8 text-indigo-600 mx-auto" />
-              <input
-                type="file"
-                accept=".pdf,.docx,.txt"
-                required
-                onChange={(e) => setPdfFileName(e.target.files?.[0]?.name || 'Document.pdf')}
-                className="text-xs text-slate-600 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
-              />
-              {pdfFileName && <p className="text-[11px] font-bold text-slate-700 mt-1">Selected: {pdfFileName}</p>}
-            </div>
-
-            {pdfUploadStatus && (
-              <div className="p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold flex items-center space-x-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{pdfUploadStatus}</span>
-              </div>
-            )}
-
-            <div className="flex space-x-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowPdfModal(false)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md"
-              >
-                Extract & Import
               </button>
             </div>
           </form>
@@ -627,13 +547,11 @@ export default function QuestionBanksPage() {
                   onChange={(e) => setQDept(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                 >
-                  <option value="All Departments">All Departments</option>
-                  <option value="AIDS">AIDS</option>
                   <option value="CSE">CSE</option>
-                  <option value="ECE">ECE</option>
+                  <option value="AI">AI</option>
                   <option value="EEE">EEE</option>
-                  <option value="MECH">MECH</option>
-                  <option value="BIOTECH">BIOTECH</option>
+                  <option value="ECE">ECE</option>
+                  <option value="IT">IT</option>
                 </select>
               </div>
               <div>
@@ -643,11 +561,10 @@ export default function QuestionBanksPage() {
                   onChange={(e) => setQYear(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                 >
-                  <option value="All Years">All Years</option>
-                  <option value="1st Year">1st Year</option>
-                  <option value="2nd Year">2nd Year</option>
-                  <option value="3rd Year">3rd Year</option>
-                  <option value="4th Year">4th Year</option>
+                  <option value="1st">1st</option>
+                  <option value="2nd">2nd</option>
+                  <option value="3rd">3rd</option>
+                  <option value="4th">4th</option>
                 </select>
               </div>
             </div>

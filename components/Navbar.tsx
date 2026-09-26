@@ -7,7 +7,6 @@ import { useAuth } from '@/lib/authContext';
 import { 
   GraduationCap, 
   ShieldAlert, 
-  FileText, 
   Users, 
   BarChart3, 
   CalendarCheck, 
@@ -41,7 +40,7 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  if (pathname.includes('/student/tests/') && !pathname.includes('/results')) {
+  if (pathname === '/login' || pathname === '/register' || (pathname.includes('/student/tests/') && !pathname.includes('/results'))) {
     return null;
   }
 
@@ -134,13 +133,6 @@ export default function Navbar() {
                   Overview
                 </Link>
                 <Link 
-                  href="/admin/proctoring" 
-                  className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors ${pathname.includes('/proctoring') ? 'bg-amber-50 text-amber-600 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
-                >
-                  <ShieldAlert className="w-4 h-4 mr-2 text-amber-500 animate-pulse" />
-                  Live Proctoring
-                </Link>
-                <Link 
                   href="/admin/users" 
                   className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors ${pathname.includes('/users') ? 'bg-blue-50 text-blue-600 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
                 >
@@ -148,11 +140,11 @@ export default function Navbar() {
                   Users & Batches
                 </Link>
                 <Link 
-                  href="/admin/audit-logs" 
-                  className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors ${pathname.includes('/audit-logs') ? 'bg-blue-50 text-blue-600 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
+                  href="/admin/tampering-logs"
+                  className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors ${pathname.includes('/tampering-logs') ? 'bg-amber-50 text-amber-700 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
                 >
-                  <FileText className="w-4 h-4 mr-2" />
-                  Audit Logs
+                  <ShieldAlert className="w-4 h-4 mr-2" />
+                  Tampering Logs
                 </Link>
               </>
             )}

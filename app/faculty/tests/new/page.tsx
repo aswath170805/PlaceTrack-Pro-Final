@@ -1,15 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
-  MOCK_BATCHES, 
-  MOCK_QUESTION_BANKS, 
-  MOCK_QUESTIONS,
+  Batch,
+  QuestionBank,
   Test, 
   Question 
-} from '@/lib/mockData';
+} from '@/lib/types';
 import { DatabaseService } from '@/lib/dbService';
+import { useAuth } from '@/lib/authContext';
 import { 
   FileCheck2, 
   ShieldAlert, 
@@ -30,84 +30,42 @@ import {
 
 interface AssessmentSession {
   id: string;
-  title: string;
-  type: 'mcq' | 'coding';
-  questionSource: 'bank' | 'custom' | 'upload_pdf';
   selectedBankId?: string;
-  questions: {
-    text: string;
-    options?: string[];
-    correctAnswer?: number;
-    starterCode?: string;
-    testCases?: { input: string; expectedOutput: string; isPublic: boolean }[];
-  }[];
 }
 
 export default function CreateTestPage() {
   const router = useRouter();
+  const { user } = useAuth();
 
   const [title, setTitle] = useState<string>('');
   const [type, setType] = useState<'daily_practice' | 'weekly_assessment' | 'custom'>('weekly_assessment');
-  const [batchId, setBatchId] = useState<string>(MOCK_BATCHES[0].id);
+  const [batchId, setBatchId] = useState<string>('');
   const [duration, setDuration] = useState<number>(45);
   const [isProctored, setIsProctored] = useState<boolean>(true);
-  const [selectedBanks, setSelectedBanks] = useState<string[]>([MOCK_QUESTION_BANKS[0].id]);
-  const [targetDepartment, setTargetDepartment] = useState<string>('All Departments');
-  const [targetYear, setTargetYear] = useState<string>('All Years');
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [questionBanks, setQuestionBanks] = useState<QuestionBank[]>([]);
+  const [targetDepartment, setTargetDepartment] = useState<string>('CSE');
+  const [targetYear, setTargetYear] = useState<string>('1st');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([DatabaseService.getBatches(), DatabaseService.getQuestionBanks()])
+      .then(([loadedBatches, loadedBanks]) => {
+        setBatches(loadedBatches);
+        setQuestionBanks(loadedBanks);
+      })
+      .catch((error) => setErrorMessage(error instanceof Error ? error.message : 'Unable to load batches and question banks.'));
+  }, []);
 
   // Sessions configuration
-  const [sessions, setSessions] = useState<AssessmentSession[]>([
-    {
-      id: 'sess-1',
-      title: 'Session 1: Aptitude & Core MCQs',
-      type: 'mcq',
-      questionSource: 'bank',
-      selectedBankId: MOCK_QUESTION_BANKS[0].id,
-      questions: [
-        {
-          text: 'What is the worst-case time complexity of binary search on a sorted array?',
-          options: ['O(n)', 'O(log n)', 'O(1)', 'O(n log n)'],
-          correctAnswer: 1,
-        }
-      ]
-    },
-    {
-      id: 'sess-2',
-      title: 'Session 2: Algorithmic Coding Challenge',
-      type: 'coding',
-      questionSource: 'custom',
-      questions: [
-        {
-          text: 'Write a function `twoSum(nums, target)` that returns the indices of the two elements adding up to target.',
-          starterCode: 'function twoSum(nums, target) {\n  // Implement solution\n}',
-          testCases: [
-            { input: '[2,7,11,15], 9', expectedOutput: '[0, 1]', isPublic: true },
-            { input: '[3,2,4], 6', expectedOutput: '[1, 2]', isPublic: true },
-            { input: '[3,3], 6', expectedOutput: '[0, 1]', isPublic: false }
-          ]
-        }
-      ]
-    }
-  ]);
+  const [sessions, setSessions] = useState<AssessmentSession[]>([]);
 
   const addSession = () => {
-    const nextNum = sessions.length + 1;
     const newSession: AssessmentSession = {
       id: 'sess-' + Date.now(),
-      title: `Session ${nextNum}: ${nextNum % 2 === 0 ? 'Coding Practice' : 'MCQ Assessment'}`,
-      type: nextNum % 2 === 0 ? 'coding' : 'mcq',
-      questionSource: 'custom',
-      questions: [
-        {
-          text: 'New question statement...',
-          options: nextNum % 2 === 0 ? undefined : ['Option A', 'Option B', 'Option C', 'Option D'],
-          correctAnswer: nextNum % 2 === 0 ? undefined : 0,
-          starterCode: nextNum % 2 === 0 ? 'function solution() {\n  // Code here\n}' : undefined,
-          testCases: nextNum % 2 === 0 ? [{ input: '[1, 2, 3]', expectedOutput: '6', isPublic: true }] : undefined
-        }
-      ]
+      selectedBankId: '',
     };
     setSessions([...sessions, newSession]);
   };
@@ -120,25 +78,37 @@ export default function CreateTestPage() {
   const handleCreateTest = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setErrorMessage(null);
 
     try {
+      if (questionBanks.length === 0) throw new Error('Create a question bank before scheduling an assessment.');
+      const selectedBankIds = [...new Set(sessions.map((session) => session.selectedBankId).filter((id): id is string => !!id))];
+      if (selectedBankIds.length === 0) throw new Error('Select at least one saved question bank.');
+      const availableQuestions = await DatabaseService.getQuestions();
+      const selectedQuestionIds = availableQuestions
+        .filter((question) => selectedBankIds.includes(question.bank_id))
+        .filter((question) => question.target_department?.toLowerCase() === targetDepartment.toLowerCase() && question.target_year?.replace(/\s+Year$/i, '') === targetYear)
+        .map((question) => question.id);
+      if (selectedQuestionIds.length === 0) throw new Error('Selected banks contain no questions routed to this department and year.');
+
       const created = await DatabaseService.createTest({
-        title: title || 'Placement Assessment & Multi-Session Mock',
+        title,
         type,
-        batch_id: batchId,
+        batch_id: batchId || undefined,
         duration_minutes: duration,
         is_proctored: isProctored,
-        created_by: 'Faculty Member',
+        created_by: user?.id || '',
         target_department: targetDepartment,
         target_year: targetYear,
       });
+      await DatabaseService.attachQuestionsToTest(created.id, selectedQuestionIds);
 
       setSuccessMessage('Assessment successfully configured and scheduled! Redirecting to Hub...');
       setTimeout(() => {
         router.push('/faculty');
       }, 1200);
     } catch (err) {
-      console.error(err);
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to create assessment.');
       setIsSubmitting(false);
     }
   };
@@ -237,7 +207,8 @@ export default function CreateTestPage() {
                   onChange={(e) => setBatchId(e.target.value)}
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
                 >
-                  {MOCK_BATCHES.map((b) => (
+                  <option value="">No batch</option>
+                  {batches.map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>
@@ -263,13 +234,11 @@ export default function CreateTestPage() {
                   onChange={(e) => setTargetDepartment(e.target.value)}
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
                 >
-                  <option value="All Departments">All Departments</option>
-                  <option value="AIDS">AIDS (Artificial Intelligence & Data Science)</option>
-                  <option value="CSE">CSE (Computer Science & Engineering)</option>
-                  <option value="ECE">ECE (Electronics & Communication)</option>
-                  <option value="EEE">EEE (Electrical & Electronics)</option>
-                  <option value="MECH">MECH (Mechanical Engineering)</option>
-                  <option value="BIOTECH">BIOTECH (Biotechnology)</option>
+                  <option value="CSE">CSE</option>
+                  <option value="AI">AI</option>
+                  <option value="EEE">EEE</option>
+                  <option value="ECE">ECE</option>
+                  <option value="IT">IT</option>
                 </select>
               </div>
 
@@ -280,22 +249,21 @@ export default function CreateTestPage() {
                   onChange={(e) => setTargetYear(e.target.value)}
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
                 >
-                  <option value="All Years">All Years</option>
-                  <option value="1st Year">1st Year (Fresher Batch)</option>
-                  <option value="2nd Year">2nd Year (Pre-Placement Foundation)</option>
-                  <option value="3rd Year">3rd Year (Internship Placement)</option>
-                  <option value="4th Year">4th Year (Final Placement Drives)</option>
+                  <option value="1st">1st</option>
+                  <option value="2nd">2nd</option>
+                  <option value="3rd">3rd</option>
+                  <option value="4th">4th</option>
                 </select>
               </div>
             </div>
 
-            {/* AI Proctoring Toggle */}
+            {/* Browser integrity event logging */}
             <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200 flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <ShieldAlert className="w-6 h-6 text-amber-600 shrink-0" />
                 <div>
-                  <h4 className="text-xs font-bold text-amber-900">Enable Client-Side AI Proctoring</h4>
-                  <p className="text-[11px] text-amber-700">Detect gaze deviation, multiple faces, mobile phone detection, and tab switching</p>
+                  <h4 className="text-xs font-bold text-amber-900">Record browser integrity events</h4>
+                  <p className="text-[11px] text-amber-700">Store tab changes, focus loss, clipboard actions, and restricted shortcuts.</p>
                 </div>
               </div>
               <input
@@ -306,15 +274,16 @@ export default function CreateTestPage() {
               />
             </div>
 
-            {/* Session Management (Session 1: MCQ, Session 2: Coding, etc.) */}
+            {errorMessage && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">{errorMessage}</p>}
+
             <div className="space-y-4 pt-2">
               <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                 <div>
                   <h3 className="text-sm font-black text-slate-900 flex items-center">
                     <Layers className="w-4 h-4 mr-2 text-indigo-600" />
-                    Assessment Sessions (Multi-Stage Execution)
+                    Question Bank Selection
                   </h3>
-                  <p className="text-[11px] text-slate-500">Configure separate sessions e.g. Session 1 MCQ & Session 2 Coding</p>
+                  <p className="text-[11px] text-slate-500">Choose saved question banks to include in this assessment.</p>
                 </div>
                 <button
                   type="button"
@@ -329,170 +298,27 @@ export default function CreateTestPage() {
               <div className="space-y-4">
                 {sessions.map((sess, idx) => (
                   <div key={sess.id} className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">
-                          {idx + 1}
-                        </span>
-                        <input
-                          type="text"
-                          value={sess.title}
-                          onChange={(e) => {
-                            const updated = [...sessions];
-                            updated[idx].title = e.target.value;
-                            setSessions(updated);
-                          }}
-                          className="font-bold text-slate-900 bg-transparent border-b border-dashed border-slate-300 focus:border-indigo-600 focus:outline-none text-xs px-1 py-0.5"
-                        />
-                      </div>
-
-                      <div className="flex items-center space-x-2">
-                        <div className="flex items-center bg-white rounded-lg p-1 border border-slate-200">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = [...sessions];
-                              updated[idx].type = 'mcq';
-                              setSessions(updated);
-                            }}
-                            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-colors ${
-                              sess.type === 'mcq' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-                            }`}
-                          >
-                            MCQ Session
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = [...sessions];
-                              updated[idx].type = 'coding';
-                              setSessions(updated);
-                            }}
-                            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-colors ${
-                              sess.type === 'coding' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-                            }`}
-                          >
-                            Coding Session
-                          </button>
-                        </div>
-
-                        {sessions.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeSession(idx)}
-                            className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                      <span>Selection {idx + 1}</span>
+                      {sessions.length > 1 && <button type="button" onClick={() => removeSession(idx)} aria-label={`Remove selection ${idx + 1}`} className="text-red-600 hover:text-red-800"><Trash2 className="h-4 w-4" /></button>}
                     </div>
 
-                    {/* Question Source selector: Type question, Bank, or PDF Upload */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
+                    <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2">
+                      <label className="block text-[11px] font-bold text-slate-700">Saved question bank</label>
+                      <select
+                        required
+                        value={sess.selectedBankId || ''}
+                        onChange={(event) => {
                           const updated = [...sessions];
-                          updated[idx].questionSource = 'custom';
+                          updated[idx].selectedBankId = event.target.value;
                           setSessions(updated);
                         }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center space-x-1.5 ${
-                          sess.questionSource === 'custom' ? 'bg-white border-indigo-500 text-indigo-700 shadow-xs' : 'bg-slate-100 border-slate-200 text-slate-600'
-                        }`}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium"
                       >
-                        <FileText className="w-3.5 h-3.5" />
-                        <span>Type / Create Questions</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = [...sessions];
-                          updated[idx].questionSource = 'bank';
-                          setSessions(updated);
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center space-x-1.5 ${
-                          sess.questionSource === 'bank' ? 'bg-white border-indigo-500 text-indigo-700 shadow-xs' : 'bg-slate-100 border-slate-200 text-slate-600'
-                        }`}
-                      >
-                        <BookOpen className="w-3.5 h-3.5" />
-                        <span>Include Question Bank</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = [...sessions];
-                          updated[idx].questionSource = 'upload_pdf';
-                          setSessions(updated);
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center space-x-1.5 ${
-                          sess.questionSource === 'upload_pdf' ? 'bg-white border-indigo-500 text-indigo-700 shadow-xs' : 'bg-slate-100 border-slate-200 text-slate-600'
-                        }`}
-                      >
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Upload PDF Questions</span>
-                      </button>
+                        <option value="">Select saved bank</option>
+                        {questionBanks.map((bank) => <option key={bank.id} value={bank.id}>{bank.title} ({bank.topic})</option>)}
+                      </select>
                     </div>
-
-                    {/* Question Source Content */}
-                    {sess.questionSource === 'bank' && (
-                      <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2">
-                        <label className="block text-[11px] font-bold text-slate-700">Select Question Bank for this session:</label>
-                        <select
-                          value={sess.selectedBankId}
-                          onChange={(e) => {
-                            const updated = [...sessions];
-                            updated[idx].selectedBankId = e.target.value;
-                            setSessions(updated);
-                          }}
-                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium"
-                        >
-                          {MOCK_QUESTION_BANKS.map((qb) => (
-                            <option key={qb.id} value={qb.id}>{qb.title} ({qb.topic})</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {sess.questionSource === 'upload_pdf' && (
-                      <div className="bg-white p-4 rounded-xl border border-dashed border-indigo-300 text-center space-y-2">
-                        <Upload className="w-6 h-6 text-indigo-600 mx-auto" />
-                        <div className="text-xs text-slate-600 font-semibold">
-                          Upload Question Paper PDF for {sess.title}
-                        </div>
-                        <input
-                          type="file"
-                          accept=".pdf,.docx,.txt"
-                          className="text-xs text-slate-500 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
-                        />
-                        <p className="text-[10px] text-slate-400">Questions will be automatically extracted and indexed into the session test runner.</p>
-                      </div>
-                    )}
-
-                    {sess.questionSource === 'custom' && (
-                      <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-                        <label className="block text-[11px] font-bold text-slate-700">Question Statement ({sess.type.toUpperCase()}):</label>
-                        <textarea
-                          rows={2}
-                          placeholder={`Enter ${sess.type} question details here...`}
-                          className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-                          defaultValue={sess.questions[0]?.text}
-                        />
-
-                        {sess.type === 'coding' && (
-                          <div>
-                            <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                              Starter Code & Test Cases (Public + Private)
-                            </span>
-                            <pre className="p-2.5 bg-slate-900 text-emerald-400 text-[11px] rounded-lg font-mono">
-                              {sess.questions[0]?.starterCode || 'function solution(nums) {\n  // Starter code\n}'}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    )}
 
                   </div>
                 ))}
@@ -506,7 +332,7 @@ export default function CreateTestPage() {
               className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-500/20 transition-colors flex items-center justify-center space-x-2"
             >
               <FileCheck2 className="w-4 h-4" />
-              <span>{isSubmitting ? 'Configuring Assessment...' : 'Publish & Schedule Multi-Session Assessment'}</span>
+              <span>{isSubmitting ? 'Saving assessment...' : 'Publish assessment'}</span>
             </button>
 
           </form>

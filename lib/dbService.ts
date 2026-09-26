@@ -1,26 +1,14 @@
 import { createClient } from '@/lib/supabase/client';
-import { 
-  MOCK_BATCHES, 
-  MOCK_PROFILES, 
-  MOCK_QUESTION_BANKS, 
-  MOCK_QUESTIONS, 
-  MOCK_TESTS, 
-  MOCK_TEST_ATTEMPTS, 
-  MOCK_PROCTORING_EVENTS, 
-  MOCK_ATTENDANCE, 
-  MOCK_AUDIT_LOGS,
-  MOCK_VERIFICATION_REQUESTS,
+import {
   Batch,
   Profile,
   QuestionBank,
   Question,
   Test,
   TestAttempt,
-  ProctoringEvent,
   AttendanceRecord,
-  AuditLog,
   VerificationRequest
-} from '@/lib/mockData';
+} from '@/lib/types';
 
 // Direct Supabase Postgres Database Service
 
@@ -31,110 +19,60 @@ export class DatabaseService {
 
   // BATCHES
   static async getBatches(): Promise<Batch[]> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('batches').select('*');
-      if (!error && data) return data as Batch[];
-    } catch (e) {
-      console.warn('Supabase DB getBatches error:', e);
-    }
-    return MOCK_BATCHES;
+    const { data, error } = await this.getSupabase().from('batches').select('*');
+    if (error) throw new Error(`Unable to load batches: ${error.message}`);
+    return (data || []) as Batch[];
   }
 
   static async createBatch(name: string, createdBy?: string): Promise<Batch> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('batches').insert([{ name, created_by: createdBy }]).select().single();
-      if (!error && data) return data as Batch;
-    } catch (e) {
-      console.warn('Supabase DB createBatch error:', e);
-    }
-    const newBatch: Batch = { id: 'b-' + Math.random().toString(36).substring(2, 9), name, created_by: createdBy, student_count: 0 };
-    MOCK_BATCHES.push(newBatch);
-    return newBatch;
+    const { data, error } = await this.getSupabase().from('batches').insert([{ name, created_by: createdBy }]).select().single();
+    if (error) throw new Error(`Unable to create batch: ${error.message}`);
+    return data as Batch;
   }
 
   // PROFILES / USERS
   static async getProfiles(): Promise<Profile[]> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('profiles').select('*');
-      if (!error && data) return data as Profile[];
-    } catch (e) {
-      console.warn('Supabase DB getProfiles error:', e);
-    }
-    return MOCK_PROFILES;
+    const { data, error } = await this.getSupabase().from('profiles').select('*');
+    if (error) throw new Error(`Unable to load profiles: ${error.message}`);
+    return (data || []) as Profile[];
   }
 
-  static async updateProfileRole(userId: string, role: 'student' | 'faculty' | 'admin', requesterId?: string): Promise<void> {
-    try {
-      if (typeof window !== 'undefined') {
-        const res = await fetch('/api/admin/update-role', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, newRole: role, requesterId: requesterId || 'a3333333-3333-3333-3333-333333333333' }),
-        });
-        if (!res.ok) {
-          console.warn('API update-role returned non-ok status');
-        }
-      } else {
-        const supabase = this.getSupabase();
-        await supabase.from('profiles').update({ role }).eq('id', userId);
-      }
-    } catch (e) {
-      console.warn('Supabase DB / API updateProfileRole error:', e);
-    }
-    const profile = MOCK_PROFILES.find((p) => p.id === userId);
-    if (profile) profile.role = role;
+  static async updateProfileRole(userId: string, role: 'student' | 'faculty' | 'admin', _requesterId?: string): Promise<void> {
+    const response = await fetch('/api/admin/update-role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, newRole: role }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) throw new Error(result.error || 'Unable to update this account role.');
   }
 
   // VERIFICATION REQUESTS
   static async getVerificationRequests(): Promise<VerificationRequest[]> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('verification_requests').select('*');
-      if (!error && data) return data as VerificationRequest[];
-    } catch (e) {
-      console.warn('Supabase DB getVerificationRequests error:', e);
-    }
-    return MOCK_VERIFICATION_REQUESTS;
+    const supabase = this.getSupabase();
+    const { data, error } = await supabase.from('verification_requests').select('*').order('created_at', { ascending: false });
+    if (error) throw new Error(`Unable to load access requests: ${error.message}`);
+    return (data || []) as VerificationRequest[];
   }
 
   static async approveVerificationRequest(requestId: string, userId: string, reviewerId?: string): Promise<boolean> {
-    try {
-      if (typeof window !== 'undefined') {
-        const res = await fetch('/api/admin/verify-request', {
+    const response = await fetch('/api/admin/verify-request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             requestId,
             userId,
             status: 'approved',
-            reviewerId: reviewerId || 'a3333333-3333-3333-3333-333333333333'
+            reviewerId,
           })
         });
-        if (res.ok) {
-          const req = MOCK_VERIFICATION_REQUESTS.find(r => r.id === requestId);
-          if (req) req.status = 'approved';
-          const prof = MOCK_PROFILES.find(p => p.id === userId);
-          if (prof) prof.is_verified = true;
-          return true;
-        }
-      }
-    } catch (e) {
-      console.warn('API approveVerificationRequest error:', e);
-    }
-    const req = MOCK_VERIFICATION_REQUESTS.find(r => r.id === requestId);
-    if (req) req.status = 'approved';
-    const prof = MOCK_PROFILES.find(p => p.id === userId);
-    if (prof) prof.is_verified = true;
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) throw new Error(result.error || 'Unable to approve this access request.');
     return true;
   }
 
   static async rejectVerificationRequest(requestId: string, userId: string, reason?: string, reviewerId?: string): Promise<boolean> {
-    try {
-      if (typeof window !== 'undefined') {
-        const res = await fetch('/api/admin/verify-request', {
+    const response = await fetch('/api/admin/verify-request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -142,205 +80,120 @@ export class DatabaseService {
             userId,
             status: 'rejected',
             reason: reason || 'Access request declined by Administrator',
-            reviewerId: reviewerId || 'a3333333-3333-3333-3333-333333333333'
+            reviewerId,
           })
         });
-        if (res.ok) {
-          const req = MOCK_VERIFICATION_REQUESTS.find(r => r.id === requestId);
-          if (req) {
-            req.status = 'rejected';
-            req.rejection_reason = reason;
-          }
-          const prof = MOCK_PROFILES.find(p => p.id === userId);
-          if (prof) prof.is_verified = false;
-          return true;
-        }
-      }
-    } catch (e) {
-      console.warn('API rejectVerificationRequest error:', e);
-    }
-    const req = MOCK_VERIFICATION_REQUESTS.find(r => r.id === requestId);
-    if (req) {
-      req.status = 'rejected';
-      req.rejection_reason = reason;
-    }
-    const prof = MOCK_PROFILES.find(p => p.id === userId);
-    if (prof) prof.is_verified = false;
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) throw new Error(result.error || 'Unable to reject this access request.');
     return true;
   }
 
   // QUESTION BANKS & QUESTIONS
   static async getQuestionBanks(): Promise<QuestionBank[]> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('question_banks').select('*');
-      if (!error && data) return data as QuestionBank[];
-    } catch (e) {
-      console.warn('Supabase DB getQuestionBanks error:', e);
-    }
-    return MOCK_QUESTION_BANKS;
+    const { data, error } = await this.getSupabase().from('question_banks').select('*');
+    if (error) throw new Error(`Unable to load question banks: ${error.message}`);
+    return (data || []) as QuestionBank[];
   }
 
   static async createQuestionBank(title: string, topic: string, createdBy: string, target_department?: string, target_year?: string): Promise<QuestionBank> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('question_banks').insert([{
+    const { data, error } = await this.getSupabase().from('question_banks').insert([{
         title,
         topic,
         created_by: createdBy,
-        target_department: target_department || 'All Departments',
-        target_year: target_year || 'All Years'
+        target_department: target_department || 'CSE',
+        target_year: target_year || '1st'
       }]).select().single();
-      if (!error && data) return data as QuestionBank;
-    } catch (e) {
-      console.warn('Supabase DB createQuestionBank error:', e);
-    }
-    const newBank: QuestionBank = {
-      id: 'qb-' + Math.random().toString(36).substring(2, 9),
-      title,
-      topic,
-      question_count: 0,
-      created_by: createdBy,
-      target_department: target_department || 'All Departments',
-      target_year: target_year || 'All Years'
-    };
-    MOCK_QUESTION_BANKS.push(newBank);
-    return newBank;
+    if (error) throw new Error(`Unable to create question bank: ${error.message}`);
+    return data as QuestionBank;
   }
 
   static async getQuestions(bankId?: string): Promise<Question[]> {
-    try {
-      const supabase = this.getSupabase();
-      let query = supabase.from('questions').select('*');
-      if (bankId) query = query.eq('bank_id', bankId);
-      const { data, error } = await query;
-      if (!error && data) return data as Question[];
-    } catch (e) {
-      console.warn('Supabase DB getQuestions error:', e);
-    }
-    return bankId ? MOCK_QUESTIONS.filter((q) => q.bank_id === bankId) : MOCK_QUESTIONS;
+    let query = this.getSupabase().from('questions').select('*');
+    if (bankId) query = query.eq('bank_id', bankId);
+    const { data, error } = await query;
+    if (error) throw new Error(`Unable to load questions: ${error.message}`);
+    return (data || []) as Question[];
   }
 
   static async getQuestionsForStudent(department?: string, year?: string): Promise<Question[]> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('questions').select('*');
-      if (!error && data) return data as Question[];
-    } catch (e) {
-      console.warn('Supabase DB getQuestionsForStudent error:', e);
-    }
+    const normalizeYear = (value?: string) => (value || '').replace(/\s+Year$/i, '').trim().toLowerCase();
+    const matchesStudentRoute = (question: Question) => {
+      const questionData = question as Question & { department?: string; academic_year?: string };
+      const targetDepartment = question.target_department || questionData.department || '';
+      const targetYear = question.target_year || questionData.academic_year || '';
+      return !!department && !!year && targetDepartment.toLowerCase() === department.toLowerCase() && normalizeYear(targetYear) === normalizeYear(year);
+    };
 
-    let questions = [...MOCK_QUESTIONS];
-    if (department) {
-      questions = questions.filter((question) => {
-        const targetDepartment = question.target_department || 'All Departments';
-        return targetDepartment === 'All Departments' || targetDepartment.toLowerCase() === department.toLowerCase();
-      });
-    }
-    if (year) {
-      questions = questions.filter((question) => {
-        const targetYear = question.target_year || 'All Years';
-        return targetYear === 'All Years' || targetYear.toLowerCase().startsWith(year.toLowerCase());
-      });
-    }
-    return questions;
+    const { data, error } = await this.getSupabase().from('questions').select('*');
+    if (error) throw new Error(`Unable to load routed questions: ${error.message}`);
+    return ((data || []) as Question[]).filter(matchesStudentRoute);
   }
 
   static async createQuestion(question: Partial<Question>): Promise<Question> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('questions').insert([{
+    const { data, error } = await this.getSupabase().from('questions').insert([{
         bank_id: question.bank_id,
         type: question.type,
         topic: question.topic,
         difficulty: question.difficulty,
         content: question.content,
-        target_department: question.target_department || 'All Departments',
-        target_year: question.target_year || 'All Years'
+        target_department: question.target_department || 'CSE',
+        target_year: question.target_year || '1st'
       }]).select().single();
-      if (!error && data) return data as Question;
-    } catch (e) {
-      console.warn('Supabase DB createQuestion error:', e);
-    }
-    const newQ: Question = {
-      id: 'q-' + Math.random().toString(36).substring(2, 9),
-      bank_id: question.bank_id || MOCK_QUESTION_BANKS[0].id,
-      type: question.type || 'mcq',
-      topic: question.topic || 'General',
-      difficulty: question.difficulty || 'medium',
-      target_department: question.target_department || 'All Departments',
-      target_year: question.target_year || 'All Years',
-      content: question.content || { questionText: 'Sample Question' },
-      created_at: new Date().toISOString(),
-    };
-    MOCK_QUESTIONS.unshift(newQ);
-    return newQ;
+    if (error) throw new Error(`Unable to create question: ${error.message}`);
+    return data as Question;
+  }
+
+  static async updateQuestion(question: Question): Promise<Question> {
+    const { data, error } = await this.getSupabase().from('questions').update({
+        type: question.type,
+        topic: question.topic,
+        difficulty: question.difficulty,
+        content: question.content,
+        target_department: question.target_department,
+        target_year: question.target_year,
+      }).eq('id', question.id).select().single();
+    if (error) throw new Error(`Unable to update question: ${error.message}`);
+    return data as Question;
   }
 
   // TESTS & TEST ATTEMPTS
   static async getTests(): Promise<Test[]> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('tests').select('*');
-      if (!error && data) return data as Test[];
-    } catch (e) {
-      console.warn('Supabase DB getTests error:', e);
-    }
-    return MOCK_TESTS;
+    const { data, error } = await this.getSupabase().from('tests').select('*');
+    if (error) throw new Error(`Unable to load assessments: ${error.message}`);
+    return (data || []) as Test[];
   }
 
   static async createTest(testData: Partial<Test>): Promise<Test> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('tests').insert([{
+    const { data, error } = await this.getSupabase().from('tests').insert([{
         title: testData.title,
         type: testData.type,
         batch_id: testData.batch_id,
+        created_by: testData.created_by,
         duration_minutes: testData.duration_minutes,
         is_proctored: testData.is_proctored,
         target_department: testData.target_department || 'All Departments',
         target_year: testData.target_year || 'All Years'
       }]).select().single();
-      if (!error && data) return data as Test;
-    } catch (e) {
-      console.warn('Supabase DB createTest error:', e);
-    }
-    const newTest: Test = {
-      id: 't-' + Math.random().toString(36).substring(2, 9),
-      title: testData.title || 'New Assessment',
-      type: testData.type || 'weekly_assessment',
-      batch_id: testData.batch_id,
-      batch_name: MOCK_BATCHES.find((b) => b.id === testData.batch_id)?.name || 'CS-2026 Batch A',
-      start_time: new Date().toISOString(),
-      end_time: new Date(Date.now() + 86400000).toISOString(),
-      duration_minutes: testData.duration_minutes || 60,
-      created_by: testData.created_by || 'Faculty Member',
-      is_proctored: testData.is_proctored !== undefined ? testData.is_proctored : true,
-      question_count: 5,
-      target_department: testData.target_department || 'All Departments',
-      target_year: testData.target_year || 'All Years',
-    };
-    MOCK_TESTS.unshift(newTest);
-    return newTest;
+    if (error) throw new Error(`Unable to create assessment: ${error.message}`);
+    return data as Test;
+  }
+
+  static async attachQuestionsToTest(testId: string, questionIds: string[]): Promise<void> {
+    const rows = questionIds.map((questionId) => ({ test_id: testId, question_id: questionId }));
+    const { error } = await this.getSupabase().from('test_questions').insert(rows);
+    if (error) throw new Error(`Unable to attach questions to assessment: ${error.message}`);
   }
 
   static async getTestAttempts(studentId?: string): Promise<TestAttempt[]> {
-    try {
-      const supabase = this.getSupabase();
-      let query = supabase.from('test_attempts').select('*');
-      if (studentId) query = query.eq('student_id', studentId);
-      const { data, error } = await query;
-      if (!error && data) return data as TestAttempt[];
-    } catch (e) {
-      console.warn('Supabase DB getTestAttempts error:', e);
-    }
-    return studentId ? MOCK_TEST_ATTEMPTS.filter((a) => a.student_id === studentId) : MOCK_TEST_ATTEMPTS;
+    let query = this.getSupabase().from('test_attempts').select('*');
+    if (studentId) query = query.eq('student_id', studentId);
+    const { data, error } = await query;
+    if (error) throw new Error(`Unable to load assessment attempts: ${error.message}`);
+    return (data || []) as TestAttempt[];
   }
 
   static async submitTestAttempt(attemptData: Partial<TestAttempt>): Promise<TestAttempt> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('test_attempts').insert([{
+    const { data, error } = await this.getSupabase().from('test_attempts').insert([{
         test_id: attemptData.test_id,
         student_id: attemptData.student_id,
         score: attemptData.score,
@@ -348,188 +201,48 @@ export class DatabaseService {
         started_at: attemptData.started_at,
         submitted_at: attemptData.submitted_at,
       }]).select().single();
-      if (!error && data) return data as TestAttempt;
-    } catch (e) {
-      console.warn('Supabase DB submitTestAttempt error:', e);
-    }
-    const newAttempt: TestAttempt = {
-      id: attemptData.id || 'att-' + Math.random().toString(36).substring(2, 9),
-      test_id: attemptData.test_id || 't-101',
-      test_title: attemptData.test_title || 'Daily Practice Set',
-      student_id: attemptData.student_id || 's1111111-1111-1111-1111-111111111111',
-      student_name: attemptData.student_name || 'Alex Johnson',
-      started_at: attemptData.started_at || new Date().toISOString(),
-      submitted_at: attemptData.submitted_at || new Date().toISOString(),
-      score: attemptData.score !== undefined ? attemptData.score : 85,
-      max_score: 100,
-      status: attemptData.status || 'submitted',
-      flag_count: attemptData.flag_count || 0,
-    };
-    MOCK_TEST_ATTEMPTS.unshift(newAttempt);
-    return newAttempt;
-  }
-
-  static async getVerificationSession(sessionId: string): Promise<any> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('verification_sessions').select('*').eq('id', sessionId).maybeSingle();
-      if (!error && data) return data;
-    } catch (e) {
-      console.warn('Supabase DB getVerificationSession error:', e);
-    }
-    return null;
-  }
-
-  static async updateVerificationSession(sessionId: string, updates: Record<string, any>): Promise<void> {
-    try {
-      const supabase = this.getSupabase();
-      await supabase.from('verification_sessions').update(updates).eq('id', sessionId);
-    } catch (e) {
-      console.warn('Supabase DB updateVerificationSession error:', e);
-    }
+    if (error) throw new Error(`Unable to save assessment attempt: ${error.message}`);
+    return data as TestAttempt;
   }
 
   static async getReadinessScore(studentId: string): Promise<{ overall_score: number }> {
-    const score = MOCK_TEST_ATTEMPTS.filter((attempt) => attempt.student_id === studentId).reduce((total, attempt) => total + (attempt.score || 0), 0);
-    const attempts = MOCK_TEST_ATTEMPTS.filter((attempt) => attempt.student_id === studentId).length || 1;
-    return { overall_score: Math.min(100, Math.round(score / attempts)) };
+    const { data, error } = await this.getSupabase().from('test_attempts').select('score').eq('student_id', studentId);
+    if (error) throw new Error(`Unable to load readiness score: ${error.message}`);
+    const scores = (data || []).map((attempt) => Number(attempt.score) || 0);
+    const overall_score = scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : 0;
+    return { overall_score };
   }
 
-  static async createVerificationSession(assessmentId: string, studentId: string): Promise<{ id: string }> {
-    const id = 'vs-' + Math.random().toString(36).substring(2, 9);
-    return { id };
-  }
-
-  static async uploadVerificationFile(file: Blob | File, filePath: string): Promise<{ path: string }> {
-    return { path: filePath };
-  }
-
-  static async saveProctoringEvidence(event: Record<string, any>): Promise<{ id: string }> {
-    return { id: 'pe-' + Math.random().toString(36).substring(2, 9) };
-  }
-
-  static async terminateTestAttempt(targetId: string, flagCount: number, reason: string): Promise<void> {
-    const attempt = MOCK_TEST_ATTEMPTS.find((item) => item.id === targetId);
-    if (attempt) {
-      attempt.status = 'flagged';
-      attempt.flag_count = flagCount;
-    }
-  }
-
-  // PROCTORING EVENTS
-  static async getProctoringEvents(attemptId?: string): Promise<ProctoringEvent[]> {
-    try {
-      const supabase = this.getSupabase();
-      let query = supabase.from('proctoring_events').select('*');
-      if (attemptId) query = query.eq('attempt_id', attemptId);
-      const { data, error } = await query;
-      if (!error && data) return data as ProctoringEvent[];
-    } catch (e) {
-      console.warn('Supabase DB getProctoringEvents error:', e);
-    }
-    return attemptId ? MOCK_PROCTORING_EVENTS.filter((e) => e.attempt_id === attemptId) : MOCK_PROCTORING_EVENTS;
-  }
-
-  static async logProctoringEvent(eventData: Partial<ProctoringEvent>): Promise<ProctoringEvent> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('proctoring_events').insert([{
-        attempt_id: eventData.attempt_id,
-        event_type: eventData.event_type,
-        severity: eventData.severity,
-        snapshot_url: eventData.snapshot_url,
-      }]).select().single();
-      if (!error && data) return data as ProctoringEvent;
-    } catch (e) {
-      console.warn('Supabase DB logProctoringEvent error:', e);
-    }
-    const newEvent: ProctoringEvent = {
-      id: eventData.id || 'pe-' + Math.random().toString(36).substring(2, 9),
-      attempt_id: eventData.attempt_id || 'att-2',
-      student_name: eventData.student_name || 'Alex Johnson',
-      test_title: eventData.test_title || 'Weekly Proctored Assessment',
-      event_type: eventData.event_type || 'tab_switch',
-      severity: eventData.severity || 'medium',
-      snapshot_url: eventData.snapshot_url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=400&auto=format&fit=crop&q=60',
-      created_at: new Date().toISOString(),
-    };
-    MOCK_PROCTORING_EVENTS.unshift(newEvent);
-    return newEvent;
+  static async terminateTestAttempt(targetId: string, _flagCount: number, _reason: string): Promise<void> {
+    const { data, error } = await this.getSupabase()
+      .from('test_attempts')
+      .update({ status: 'flagged', submitted_at: new Date().toISOString() })
+      .eq('id', targetId)
+      .select('id')
+      .single();
+    if (error) throw new Error(`Unable to terminate assessment: ${error.message}`);
+    if (!data) throw new Error('Assessment attempt not found.');
   }
 
   // ATTENDANCE
   static async getAttendanceRecords(studentId?: string): Promise<AttendanceRecord[]> {
-    try {
-      const supabase = this.getSupabase();
-      let query = supabase.from('attendance').select('*');
-      if (studentId) query = query.eq('student_id', studentId);
-      const { data, error } = await query;
-      if (!error && data) return data as AttendanceRecord[];
-    } catch (e) {
-      console.warn('Supabase DB getAttendanceRecords error:', e);
-    }
-    return studentId ? MOCK_ATTENDANCE.filter((a) => a.student_id === studentId) : MOCK_ATTENDANCE;
-  }
+    let query = this.getSupabase().from('attendance_logs').select('id, student_id, entry_type, login_timestamp');
+    if (studentId) query = query.eq('student_id', studentId);
+    const { data, error } = await query.order('login_timestamp', { ascending: false });
+    if (error) throw new Error(`Unable to load attendance logs: ${error.message}`);
 
-  static async submitAbsenceReason(recordId: string, reason: string): Promise<void> {
-    try {
-      const supabase = this.getSupabase();
-      await supabase.from('attendance').update({ absence_reason: reason, reviewed_by_faculty: false }).eq('id', recordId);
-    } catch (e) {
-      console.warn('Supabase DB submitAbsenceReason error:', e);
-    }
-    const rec = MOCK_ATTENDANCE.find((a) => a.id === recordId);
-    if (rec) {
-      rec.absence_reason = reason;
-      rec.reviewed_by_faculty = false;
-    }
-  }
-
-  static async reviewAttendance(recordId: string, statusOverride?: 'present' | 'absent'): Promise<void> {
-    try {
-      const supabase = this.getSupabase();
-      const updates: any = { reviewed_by_faculty: true };
-      if (statusOverride) updates.status = statusOverride;
-      await supabase.from('attendance').update(updates).eq('id', recordId);
-    } catch (e) {
-      console.warn('Supabase DB reviewAttendance error:', e);
-    }
-    const rec = MOCK_ATTENDANCE.find((a) => a.id === recordId);
-    if (rec) {
-      rec.reviewed_by_faculty = true;
-      if (statusOverride) rec.status = statusOverride;
-    }
-  }
-
-  // AUDIT LOGS
-  static async getAuditLogs(): Promise<AuditLog[]> {
-    try {
-      const supabase = this.getSupabase();
-      const { data, error } = await supabase.from('audit_logs').select('*');
-      if (!error && data) return data as AuditLog[];
-    } catch (e) {
-      console.warn('Supabase DB getAuditLogs error:', e);
-    }
-    return MOCK_AUDIT_LOGS;
-  }
-
-  static async logAdminAction(action: string, targetTable: string, targetId?: string, metadata?: any): Promise<void> {
-    try {
-      const supabase = this.getSupabase();
-      await supabase.from('audit_logs').insert([{ action, target_table: targetTable, target_id: targetId, metadata }]);
-    } catch (e) {
-      console.warn('Supabase DB logAdminAction error:', e);
-    }
-    const newLog: AuditLog = {
-      id: 'log-' + Math.random().toString(36).substring(2, 9),
-      actor_id: 'a3333333-3333-3333-3333-333333333333',
-      actor_name: 'Placement Admin',
-      action,
-      target_table: targetTable,
-      target_id: targetId,
-      metadata,
-      created_at: new Date().toISOString(),
-    };
-    MOCK_AUDIT_LOGS.unshift(newLog);
+    const profiles = await this.getSupabase().from('profiles').select('id, full_name');
+    if (profiles.error) throw new Error(`Unable to load attendance names: ${profiles.error.message}`);
+    const names = new Map((profiles.data || []).map((profile) => [profile.id, profile.full_name]));
+    return (data || []).map((record) => ({
+      id: record.id,
+      student_id: record.student_id,
+      student_name: names.get(record.student_id),
+      session_id: record.id,
+      session_title: record.entry_type === 'assessment_entry' ? 'Assessment entry' : 'Portal login',
+      status: 'present' as const,
+      reviewed_by_faculty: false,
+      created_at: record.login_timestamp,
+    }));
   }
 }

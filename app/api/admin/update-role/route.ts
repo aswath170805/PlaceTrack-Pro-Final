@@ -1,37 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-
-async function validateAdmin(requesterId: string): Promise<boolean> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
-    // Graceful fallback for mock mode: verify against seed system admin ID
-    return requesterId === 'a3333333-3333-3333-3333-333333333333';
-  }
-
-  try {
-    const supabase = createAdminClient();
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('role, is_verified')
-      .eq('id', requesterId)
-      .single();
-    if (error || !data) return false;
-    return data.role === 'admin' && data.is_verified === true;
-  } catch (e) {
-    console.error('validateAdmin DB error:', e);
-    return requesterId === 'a3333333-3333-3333-3333-333333333333';
-  }
-}
+import { requireRole } from '@/lib/supabase/auth';
 
 export async function POST(req: Request) {
   try {
-    const { userId, newRole, requesterId } = await req.json();
-
-    if (!requesterId || !(await validateAdmin(requesterId))) {
-      return NextResponse.json(
-        { success: false, error: 'Access Denied: Requester must be a verified Administrator!' },
-        { status: 403 }
-      );
+    const requester = await requireRole(['admin']);
+    const { userId, newRole } = await req.json();
+    if (!userId || !['student', 'faculty', 'admin'].includes(newRole)) {
+      return NextResponse.json({ success: false, error: 'A userId and valid role are required.' }, { status: 400 });
     }
 
     const supabase = createAdminClient();
@@ -39,9 +15,12 @@ export async function POST(req: Request) {
     // Fetch original name for audit log
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('full_name')
+      .select('full_name, is_super_admin')
       .eq('id', userId)
       .single();
+    if (profileData?.is_super_admin && !requester.is_super_admin) {
+      return NextResponse.json({ success: false, error: 'Only a super-admin can change another super-admin account.' }, { status: 403 });
+    }
 
     // Perform database role update
     const { error: updateError } = await supabase
@@ -56,7 +35,7 @@ export async function POST(req: Request) {
     // Log admin action in database
     await supabase.from('audit_logs').insert([
       {
-        actor_id: requesterId,
+        actor_id: requester.id,
         actor_name: 'Placement Admin',
         action: 'UPDATE_USER_ROLE',
         target_table: 'profiles',
@@ -68,6 +47,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true });
   } catch (err: any) {
     console.error('API update-role error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: err.message === 'UNAUTHORIZED' ? 401 : 500 });
   }
 }

@@ -1,30 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DatabaseService } from '@/lib/dbService';
+import { createClient } from '@/lib/supabase/server';
+import { requireRole } from '@/lib/supabase/auth';
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const testId = params.id;
+    const { id: testId } = await params;
+    const student = await requireRole(['student']);
     const body = await req.json();
-    const { attemptId, flagCount = 3, reason = 'Exceeded maximum allowed security violations (3-Strike Limit)' } = body;
+    const { attemptId } = body;
 
-    const targetId = attemptId || testId;
-    await DatabaseService.terminateTestAttempt(targetId, flagCount, reason);
-
-    await DatabaseService.logAdminAction(
-      'ASSESSMENT_TERMINATED',
-      'test_attempts',
-      targetId,
-      { flag_count: flagCount, reason, status: 'terminated_for_malpractice' }
-    );
+    if (!attemptId) return NextResponse.json({ success: false, error: 'attemptId is required.' }, { status: 400 });
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('test_attempts')
+      .update({ status: 'flagged', submitted_at: new Date().toISOString() })
+      .eq('id', attemptId)
+      .eq('test_id', testId)
+      .eq('student_id', student.id)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return NextResponse.json({ success: false, error: 'Assessment attempt not found.' }, { status: 404 });
 
     return NextResponse.json({
       success: true,
-      status: 'terminated_for_malpractice',
-      flagCount,
-      reason,
+      status: 'flagged',
       terminatedAt: new Date().toISOString(),
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: err.message === 'UNAUTHORIZED' ? 401 : 500 });
   }
 }

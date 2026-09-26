@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
-import { MOCK_BATCHES } from '@/lib/mockData';
 import { GraduationCap, Lock, Mail, User, BookOpen, ArrowRight, AlertCircle } from 'lucide-react';
 
 export default function RegisterPage() {
@@ -15,9 +14,8 @@ export default function RegisterPage() {
   const [password, setPassword] = useState<string>('');
   const [fullName, setFullName] = useState<string>('');
   const [role, setRole] = useState<'student' | 'faculty'>('student');
-  const [department, setDepartment] = useState<string>('Computer Science');
-  const [yearOfStudy, setYearOfStudy] = useState<string>('Final Year');
-  const [batchId, setBatchId] = useState<string>(MOCK_BATCHES[0].id);
+  const [department, setDepartment] = useState<string>('CSE');
+  const [yearOfStudy, setYearOfStudy] = useState<string>('4th');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -31,7 +29,6 @@ export default function RegisterPage() {
       role,
       department,
       yearOfStudy,
-      batchId,
     });
 
     if (res.success) {
@@ -65,9 +62,17 @@ export default function RegisterPage() {
         <div className="bg-slate-900 border border-slate-800 py-8 px-6 shadow-2xl sm:rounded-3xl sm:px-10">
           
           {errorMsg && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMsg}</span>
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300" role="alert">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{errorMsg}</span>
+              </div>
+              {(errorMsg.includes('temporarily limited confirmation emails') || errorMsg.includes('account may already exist')) && (
+                <p className="mt-2 pl-6 text-slate-300">
+                  Check your inbox and try signing in before registering again. For recurring limits, configure a custom SMTP provider in Supabase Auth email settings.{' '}
+                  <Link href="/login" className="font-bold text-blue-300 underline underline-offset-2">Go to sign in</Link>
+                </p>
+              )}
             </div>
           )}
 
@@ -151,9 +156,11 @@ export default function RegisterPage() {
                   onChange={(e) => setDepartment(e.target.value)}
                   className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
                 >
-                  <option value="Computer Science">Computer Science</option>
-                  <option value="Information Technology">Information Tech</option>
-                  <option value="Electronics & Comm">Electronics & Comm</option>
+                  <option value="CSE">CSE</option>
+                  <option value="AI">AI</option>
+                  <option value="EEE">EEE</option>
+                  <option value="ECE">ECE</option>
+                  <option value="IT">IT</option>
                 </select>
               </div>
 
@@ -165,8 +172,10 @@ export default function RegisterPage() {
                     onChange={(e) => setYearOfStudy(e.target.value)}
                     className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
                   >
-                    <option value="Final Year">Final Year (2026)</option>
-                    <option value="Pre-Final Year">Pre-Final Year</option>
+                    <option value="1st">1st</option>
+                    <option value="2nd">2nd</option>
+                    <option value="3rd">3rd</option>
+                    <option value="4th">4th</option>
                   </select>
                 </div>
               )}

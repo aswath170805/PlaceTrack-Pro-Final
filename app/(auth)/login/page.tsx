@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
@@ -8,11 +8,18 @@ import { GraduationCap, Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react
 
 export default function CentralizedLoginPage() {
   const router = useRouter();
-  const { signInWithEmail, isLoading, isAdminAccessVisible, isFacultyAccessVisible } = useAuth();
+  const { signInWithEmail, logout, isLoading, isAdminAccessVisible, isFacultyAccessVisible } = useAuth();
 
+  const [accessRole, setAccessRole] = useState<'student' | 'faculty' | 'admin'>('student');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if ((accessRole === 'admin' && !isAdminAccessVisible) || (accessRole === 'faculty' && !isFacultyAccessVisible)) {
+      setAccessRole('student');
+    }
+  }, [accessRole, isAdminAccessVisible, isFacultyAccessVisible]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,6 +27,16 @@ export default function CentralizedLoginPage() {
 
     const res = await signInWithEmail(email, password);
     if (res.success && res.role) {
+      if (res.role !== accessRole) {
+        await logout();
+        setErrorMsg(`These credentials do not belong to the ${accessRole} sign-in view.`);
+        return;
+      }
+      if (res.role !== 'admin' && res.isVerified !== true) {
+        await logout();
+        setErrorMsg('Your account is awaiting administrator approval. Please try again after access is confirmed.');
+        return;
+      }
       if (res.role === 'admin') router.push('/admin');
       else if (res.role === 'faculty') router.push('/faculty');
       else router.push('/student');
@@ -40,9 +57,9 @@ export default function CentralizedLoginPage() {
           </div>
         </Link>
 
-        <h2 className="text-3xl font-black tracking-tight text-white">PlaceTrack Pro Portal Sign In</h2>
+        <h2 className="text-3xl font-black tracking-tight text-white">{accessRole === 'faculty' ? 'Faculty Sign In' : accessRole === 'admin' ? 'Admin Sign In' : 'Student Sign In'}</h2>
         <p className="mt-2 text-xs text-slate-400">
-          Sign in with your email to access your assigned portal.
+          Sign in with your registered college account.
         </p>
       </div>
 
@@ -91,7 +108,7 @@ export default function CentralizedLoginPage() {
               disabled={isLoading}
               className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center"
             >
-              {isLoading ? 'Authenticating...' : 'Sign In to Portal'}
+              {isLoading ? 'Authenticating...' : `Sign In as ${accessRole === 'faculty' ? 'Faculty' : accessRole === 'admin' ? 'Admin' : 'Student'}`}
               <ArrowRight className="w-4 h-4 ml-1.5" />
             </button>
           </form>
@@ -101,19 +118,21 @@ export default function CentralizedLoginPage() {
               {isAdminAccessVisible && (
                 <button
                   type="button"
-                  onClick={() => router.push('/admin')}
-                  className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl"
+                  onClick={() => setAccessRole('admin')}
+                  aria-pressed={accessRole === 'admin'}
+                  className={`w-full py-2.5 text-white font-bold text-xs rounded-xl ${accessRole === 'admin' ? 'bg-amber-500' : 'bg-amber-700 hover:bg-amber-600'}`}
                 >
-                  Admin Entry
+                  Admin Sign In
                 </button>
               )}
               {isFacultyAccessVisible && (
                 <button
                   type="button"
-                  onClick={() => router.push('/faculty')}
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl"
+                  onClick={() => setAccessRole('faculty')}
+                  aria-pressed={accessRole === 'faculty'}
+                  className={`w-full py-2.5 text-white font-bold text-xs rounded-xl ${accessRole === 'faculty' ? 'bg-indigo-500' : 'bg-indigo-700 hover:bg-indigo-600'}`}
                 >
-                  Faculty Entry
+                  Faculty / Teacher Sign In
                 </button>
               )}
             </div>

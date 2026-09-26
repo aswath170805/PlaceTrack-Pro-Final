@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/authContext';
 import { DatabaseService } from '@/lib/dbService';
-import { MOCK_PROFILES, MOCK_BATCHES, Profile, Batch, VerificationRequest } from '@/lib/mockData';
+import { Profile, VerificationRequest } from '@/lib/types';
 import { 
   Users, 
   UserCheck, 
@@ -16,60 +16,89 @@ import {
   Shield, 
   Check, 
   X,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
 
 export default function UserManagementPage() {
   const { user: currentAdmin } = useAuth();
 
   const [users, setUsers] = useState<Profile[]>([]);
-  const [batches, setBatches] = useState<Batch[]>([]);
   const [requests, setRequests] = useState<VerificationRequest[]>([]);
+  const [requestLoadError, setRequestLoadError] = useState<string | null>(null);
+  const [isLoadingRequests, setIsLoadingRequests] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusIsError, setStatusIsError] = useState(false);
 
   useEffect(() => {
     async function loadData() {
-      const p = await DatabaseService.getProfiles();
-      const b = await DatabaseService.getBatches();
-      const vr = await DatabaseService.getVerificationRequests();
-      setUsers(p);
-      setBatches(b);
-      setRequests(vr);
+      const profiles = await DatabaseService.getProfiles();
+      setUsers(profiles);
+      try {
+        setRequests(await DatabaseService.getVerificationRequests());
+        setRequestLoadError(null);
+      } catch (error) {
+        setRequests([]);
+        setRequestLoadError(error instanceof Error ? error.message : 'Access requests could not be loaded.');
+      } finally {
+        setIsLoadingRequests(false);
+      }
     }
     loadData();
   }, []);
 
   const handleRoleChange = async (userId: string, newRole: 'student' | 'faculty' | 'admin') => {
-    await DatabaseService.updateProfileRole(userId, newRole, currentAdmin?.id);
-    setUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-    );
-    setStatusMessage(`User role successfully updated to ${newRole.toUpperCase()}!`);
-    setTimeout(() => setStatusMessage(null), 3000);
+    try {
+      await DatabaseService.updateProfileRole(userId, newRole, currentAdmin?.id);
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
+      setStatusIsError(false);
+      setStatusMessage(`User role successfully updated to ${newRole.toUpperCase()}.`);
+    } catch (error) {
+      setStatusIsError(true);
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to update this account role.');
+    }
+  };
+
+  const handleDeleteUser = async (user: Profile) => {
+    if (!window.confirm(`Permanently delete ${user.full_name} and their account?`)) return;
+    const response = await fetch('/api/admin/delete-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      setStatusMessage(result.error || 'Unable to delete this account.');
+      return;
+    }
+    setUsers((previous) => previous.filter((entry) => entry.id !== user.id));
+    setStatusMessage(`Deleted account for ${user.full_name}.`);
   };
 
   const handleApprove = async (req: VerificationRequest) => {
-    await DatabaseService.approveVerificationRequest(req.id, req.user_id, currentAdmin?.id);
-    setRequests((prev) =>
-      prev.map((r) => (r.id === req.id ? { ...r, status: 'approved' } : r))
-    );
-    setUsers((prev) =>
-      prev.map((u) => (u.id === req.user_id ? { ...u, is_verified: true } : u))
-    );
-    setStatusMessage(`Approved access request for ${req.user_name || 'Faculty'}!`);
-    setTimeout(() => setStatusMessage(null), 3000);
+    try {
+      await DatabaseService.approveVerificationRequest(req.id, req.user_id, currentAdmin?.id);
+      setRequests((prev) => prev.map((r) => (r.id === req.id ? { ...r, status: 'approved' } : r)));
+      setUsers((prev) => prev.map((u) => (u.id === req.user_id ? { ...u, is_verified: true } : u)));
+      setStatusIsError(false);
+      setStatusMessage(`Approved access request for ${req.user_name || 'user'}.`);
+    } catch (error) {
+      setStatusIsError(true);
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to approve this access request.');
+    }
   };
 
   const handleReject = async (req: VerificationRequest) => {
-    await DatabaseService.rejectVerificationRequest(req.id, req.user_id, 'Access declined by Placement Administrator', currentAdmin?.id);
-    setRequests((prev) =>
-      prev.map((r) => (r.id === req.id ? { ...r, status: 'rejected' } : r))
-    );
-    setUsers((prev) =>
-      prev.map((u) => (u.id === req.user_id ? { ...u, is_verified: false } : u))
-    );
-    setStatusMessage(`Declined access request for ${req.user_name || 'User'}.`);
-    setTimeout(() => setStatusMessage(null), 3000);
+    try {
+      await DatabaseService.rejectVerificationRequest(req.id, req.user_id, 'Access declined by Placement Administrator', currentAdmin?.id);
+      setRequests((prev) => prev.map((r) => (r.id === req.id ? { ...r, status: 'rejected' } : r)));
+      setUsers((prev) => prev.map((u) => (u.id === req.user_id ? { ...u, is_verified: false } : u)));
+      setStatusIsError(false);
+      setStatusMessage(`Declined access request for ${req.user_name || 'user'}.`);
+    } catch (error) {
+      setStatusIsError(true);
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to reject this access request.');
+    }
   };
 
   const pendingRequests = requests.filter((r) => r.status === 'pending');
@@ -100,8 +129,8 @@ export default function UserManagementPage() {
         </div>
 
         {statusMessage && (
-          <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-800 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <div className={`p-4 border rounded-2xl text-xs font-bold flex items-center space-x-2 animate-in fade-in ${statusIsError ? 'bg-red-50 border-red-300 text-red-800' : 'bg-emerald-50 border-emerald-300 text-emerald-800'}`} role={statusIsError ? 'alert' : 'status'}>
+            {statusIsError ? <AlertCircle className="w-4 h-4 text-red-600 shrink-0" /> : <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
             <span>{statusMessage}</span>
           </div>
         )}
@@ -124,24 +153,32 @@ export default function UserManagementPage() {
           </div>
 
           <div className="p-6 pt-0">
-            {requests.length === 0 ? (
+            {requestLoadError ? (
+              <div role="alert" className="m-6 rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-medium text-red-800">
+                {requestLoadError}. No placeholder requests are being shown.
+              </div>
+            ) : isLoadingRequests ? (
+              <div className="text-center py-8 text-xs text-slate-400">Loading access requests...</div>
+            ) : pendingRequests.length === 0 ? (
               <div className="text-center py-8 text-xs text-slate-400">
-                No access requests logged yet.
+                No pending access requests.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {requests.map((req) => (
+                {pendingRequests.map((req) => {
+                  const profile = users.find((user) => user.id === req.user_id);
+                  return (
                   <div key={req.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col justify-between space-y-3">
                     <div className="flex items-start justify-between">
                       <div>
-                        <span className="font-bold text-slate-900 text-xs block">{req.user_name || 'Faculty Candidate'}</span>
+                        <span className="font-bold text-slate-900 text-xs block">{req.user_name || profile?.full_name || 'Account'}</span>
                         <span className="text-[11px] text-slate-500 flex items-center mt-0.5">
                           <Mail className="w-3 h-3 mr-1 text-slate-400" />
-                          {req.email || 'faculty@svce.ac.in'}
+                          {req.email || profile?.email || req.user_id}
                         </span>
                         <span className="text-[11px] text-slate-500 flex items-center mt-0.5">
                           <Building2 className="w-3 h-3 mr-1 text-slate-400" />
-                          Department: {req.department || 'CSE'}
+                          Department: {req.department || profile?.department || 'Not provided'}
                         </span>
                       </div>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
@@ -170,7 +207,8 @@ export default function UserManagementPage() {
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -195,6 +233,7 @@ export default function UserManagementPage() {
                   <th className="p-4">Status</th>
                   <th className="p-4">Current Role</th>
                   <th className="p-4">Change Role (Backend API)</th>
+                  {currentAdmin?.is_super_admin && <th className="p-4">Account</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -241,6 +280,20 @@ export default function UserManagementPage() {
                         <option value="admin">Admin</option>
                       </select>
                     </td>
+                    {currentAdmin?.is_super_admin && (
+                      <td className="p-4">
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteUser(u)}
+                          disabled={u.is_super_admin}
+                          title={u.is_super_admin ? 'Super-admin accounts cannot be deleted here' : 'Delete user account'}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

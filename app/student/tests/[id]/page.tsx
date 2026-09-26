@@ -1,13 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { 
-  MOCK_TESTS, 
-  MOCK_QUESTIONS, 
   Question, 
-  ProctoringEvent 
-} from '@/lib/mockData';
+  Test,
+} from '@/lib/types';
 import ProctoringMonitor from '@/components/proctoring/ProctoringMonitor';
 import { 
   Clock, 
@@ -34,19 +32,49 @@ import {
   Lightbulb
 } from 'lucide-react';
 
+function runCodeInWorker(code: string, functionName: string, input: string): Promise<{ actual: string; error?: string }> {
+  return new Promise((resolve) => {
+    const workerSource = `self.onmessage = ({ data }) => {
+      try {
+        const execute = new Function(data.code + "\\nreturn " + data.functionName + "(" + data.input + ");
+        const value = execute();
+        self.postMessage({ actual: JSON.stringify(value) ?? "undefined" });
+      } catch (error) {
+        self.postMessage({ error: String(error && error.message || error) });
+      }
+    };`;
+    const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
+    const worker = new Worker(workerUrl);
+    const finish = (result: { actual: string; error?: string }) => {
+      window.clearTimeout(timeoutId);
+      worker.terminate();
+      URL.revokeObjectURL(workerUrl);
+      resolve(result);
+    };
+    const timeoutId = window.setTimeout(() => finish({ actual: 'Execution timed out', error: 'Time limit exceeded' }), 1500);
+
+    worker.onmessage = (event: MessageEvent<{ actual?: string; error?: string }>) => {
+      finish({ actual: event.data.actual || 'undefined', error: event.data.error });
+    };
+    worker.onerror = () => finish({ actual: 'Runtime Error', error: 'Worker execution failed' });
+    worker.postMessage({ code, functionName, input });
+  });
+}
+
 export default function TestEnvironment() {
   const router = useRouter();
   const params = useParams();
   const testId = params.id as string;
 
-  const test = MOCK_TESTS.find((t) => t.id === testId) || MOCK_TESTS[0];
-  const questions: Question[] = MOCK_QUESTIONS;
+  const [test, setTest] = useState<Test | null>(null);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [currentIdx, setCurrentIdx] = useState<number>(0);
   const [answers, setAnswers] = useState<Record<string, any>>({});
-  const [timeLeft, setTimeLeft] = useState<number>(test.duration_minutes * 60);
+  const [timeLeft, setTimeLeft] = useState<number>(0);
   const [isSaved, setIsSaved] = useState<boolean>(true);
-  const [proctorFlags, setProctorFlags] = useState<ProctoringEvent[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
 
   // LeetCode UI State
@@ -56,6 +84,9 @@ export default function TestEnvironment() {
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [codeCaseResults, setCodeCaseResults] = useState<Record<string, boolean>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const submitTestRef = useRef<((force?: boolean) => Promise<void>) | null>(null);
   const [evaluationResults, setEvaluationResults] = useState<{
     total: number;
     passed: number;
@@ -73,6 +104,28 @@ export default function TestEnvironment() {
 
   const currentQ = questions[currentIdx];
 
+  useEffect(() => {
+    let isActive = true;
+    setIsLoadingQuestions(true);
+    fetch(`/api/student/tests/${testId}`)
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Unable to load this assessment.');
+        if (!isActive) return;
+        setTest(result.test as Test);
+        setTimeLeft((result.test as Test).duration_minutes * 60);
+        setQuestions(result.questions as Question[]);
+        setLoadError(null);
+      })
+      .catch((error) => {
+        if (isActive) setLoadError(error.message || 'Unable to load this assessment.');
+      })
+      .finally(() => {
+        if (isActive) setIsLoadingQuestions(false);
+      });
+    return () => { isActive = false; };
+  }, [testId]);
+
   // Language templates
   const getStarterCodeForLang = (q: Question, lang: 'javascript' | 'python' | 'cpp') => {
     if (lang === 'javascript') {
@@ -86,11 +139,12 @@ export default function TestEnvironment() {
 
   // Timer Countdown Effect
   useEffect(() => {
+    if (isLoadingQuestions || loadError || !test || questions.length === 0) return;
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          handleSubmitTest();
+          void submitTestRef.current?.(true);
           return 0;
         }
         return prev - 1;
@@ -98,7 +152,7 @@ export default function TestEnvironment() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [isLoadingQuestions, loadError, questions.length, test]);
 
   // Format Time
   const formatTime = (seconds: number) => {
@@ -110,81 +164,40 @@ export default function TestEnvironment() {
   // Handle Option Select
   const handleSelectAnswer = (qId: string, val: any) => {
     setAnswers((prev) => ({ ...prev, [qId]: val }));
+    setCodeCaseResults((previous) => {
+      const next = { ...previous };
+      delete next[qId];
+      return next;
+    });
     setIsSaved(false);
     setTimeout(() => setIsSaved(true), 400);
   };
 
   // Safe Execution Engine for LeetCode test cases
-  const runCodeExecution = (onlyPublic: boolean) => {
+  const runCodeExecution = async () => {
     const userCode = answers[currentQ.id] || currentQ.content.starterCode || '';
-    const testCases = currentQ.content.testCases || [
-      { input: '[2,7,11,15], 9', expectedOutput: '[0, 1]', isPublic: true },
-      { input: '[3,2,4], 6', expectedOutput: '[1, 2]', isPublic: true },
-      { input: '[3,3], 6', expectedOutput: '[0, 1]', isPublic: false }
-    ];
+    const testCases = currentQ.content.testCases || [];
 
-    const targetCases = onlyPublic ? testCases.filter((tc) => tc.isPublic !== false) : testCases;
+    const targetCases = testCases.filter((testCase) => testCase.isPublic !== false);
     const evaluatedCases: any[] = [];
     let passedCount = 0;
 
-    if (selectedLanguage !== 'javascript') {
-      // For Python and C++, simulate evaluation with validation check
-      targetCases.forEach((tc, idx) => {
-        const isPassed = userCode.trim().length > 25 && !userCode.includes('pass');
-        if (isPassed) passedCount++;
-        evaluatedCases.push({
-          index: idx + 1,
-          isPublic: tc.isPublic !== false,
-          input: tc.input,
-          expected: tc.expectedOutput,
-          actual: isPassed ? tc.expectedOutput : 'Null / Incomplete logic',
-          passed: isPassed
-        });
-      });
-    } else {
-      // Live JavaScript Sandbox Evaluation
-      targetCases.forEach((tc, idx) => {
-        try {
-          const functionMatch = userCode.match(/function\s+([a-zA-Z0-9_]+)\s*\(/);
-          const functionName = functionMatch ? functionMatch[1] : 'solution';
-
-          const runnerScript = `
-            ${userCode}
-            try {
-              return ${functionName}(${tc.input});
-            } catch(e) {
-              throw e;
-            }
-          `;
-
-          const executeFn = new Function(runnerScript);
-          const actualResult = executeFn();
-          const actualStr = JSON.stringify(actualResult);
-          const expectedNormalized = tc.expectedOutput.replace(/\s+/g, '');
-          const actualNormalized = actualStr ? actualStr.replace(/\s+/g, '') : '';
-
-          const isPassed = actualNormalized === expectedNormalized;
-          if (isPassed) passedCount++;
-
-          evaluatedCases.push({
-            index: idx + 1,
-            isPublic: tc.isPublic !== false,
-            input: tc.input,
-            expected: tc.expectedOutput,
-            actual: actualStr !== undefined ? actualStr : 'undefined',
-            passed: isPassed,
-          });
-        } catch (err: any) {
-          evaluatedCases.push({
-            index: idx + 1,
-            isPublic: tc.isPublic !== false,
-            input: tc.input,
-            expected: tc.expectedOutput,
-            actual: 'Runtime Error',
-            passed: false,
-            error: err?.message || 'Syntax or evaluation error in code'
-          });
-        }
+    const functionMatch = userCode.match(/function\s+([a-zA-Z0-9_]+)\s*\(/);
+    const functionName = functionMatch ? functionMatch[1] : 'solution';
+    for (const [idx, testCase] of targetCases.entries()) {
+      const result = await runCodeInWorker(userCode, functionName, testCase.input);
+      const expectedNormalized = testCase.expectedOutput.replace(/\s+/g, '');
+      const actualNormalized = result.actual.replace(/\s+/g, '');
+      const isPassed = !result.error && actualNormalized === expectedNormalized;
+      if (isPassed) passedCount++;
+      evaluatedCases.push({
+        index: idx + 1,
+        isPublic: true,
+        input: testCase.input,
+        expected: testCase.expectedOutput,
+        actual: result.actual,
+        passed: isPassed,
+        error: result.error,
       });
     }
 
@@ -196,36 +209,24 @@ export default function TestEnvironment() {
     };
 
     setEvaluationResults(resultSummary);
+    setCodeCaseResults((previous) => ({ ...previous, [currentQ.id]: passedCount === targetCases.length }));
     setActiveTab('results');
+    void fetch('/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questionId: currentQ.id, code: userCode }),
+    }).catch((error) => console.warn('Code submission could not be recorded', error));
 
-    // Contextual AI Review on Submission
-    if (!onlyPublic) {
-      if (passedCount === targetCases.length) {
-        setAiFeedback(
-          `🌟 AI Code Review: Excellent! All ${targetCases.length} public and hidden private test cases passed cleanly.\n\n• Algorithmic Correctness: 100% verified across boundary cases.\n• Time Complexity: Optimal O(N) linear time approach.\n• Code Quality: Clean modular logic with standard return types.`
-        );
-      } else {
-        setAiFeedback(
-          `🤖 AI Code Review: Encountered failures on ${targetCases.length - passedCount} test case(s).\n\n• Diagnostic: Verify boundary edge-cases (duplicate numbers, zero values, or target complement matching the same index).\n• Recommendation: Use a Map/Object to store index references in a single pass.`
-        );
-      }
-    }
   };
 
   const handleRunPublicCode = () => {
     setIsRunning(true);
-    setTimeout(() => {
-      runCodeExecution(true);
-      setIsRunning(false);
-    }, 400);
+    void runCodeExecution().finally(() => setIsRunning(false));
   };
 
   const handleSubmitAllCode = () => {
     setIsSubmitting(true);
-    setTimeout(() => {
-      runCodeExecution(false);
-      setIsSubmitting(false);
-    }, 600);
+    void runCodeExecution().finally(() => setIsSubmitting(false));
   };
 
   // AI Tutor Actions
@@ -282,16 +283,40 @@ export default function TestEnvironment() {
     }, 450);
   };
 
-  // Log Proctoring Event Callback
-  const handleProctorEvent = (event: ProctoringEvent) => {
-    setProctorFlags((prev) => [event, ...prev]);
+  // Submit Test Handler
+  const handleSubmitTest = async (force = false) => {
+    if (!force && questions.some((question) => question.type === 'coding' && codeCaseResults[question.id] !== true)) {
+      setSubmitError('Run and pass the public test cases for each coding question before submitting.');
+      setShowConfirmModal(true);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/student/tests/${testId}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Unable to submit this assessment.');
+      router.push(`/student/results/${result.attemptId}`);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to submit this assessment.');
+      setShowConfirmModal(true);
+    }
   };
 
-  // Submit Test Handler
-  const handleSubmitTest = () => {
-    const newAttemptId = 'att-' + Math.random().toString(36).substring(2, 8);
-    router.push(`/student/results/${newAttemptId}`);
-  };
+  useEffect(() => {
+    submitTestRef.current = handleSubmitTest;
+  });
+
+  if (isLoadingQuestions) {
+    return <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center text-sm">Loading allocated assessment...</div>;
+  }
+
+  if (loadError || !test || questions.length === 0) {
+    return <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center px-6 text-center text-sm">{loadError || 'No questions are routed to your department and academic year.'}</div>;
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-between selection:bg-indigo-600 selection:text-white font-sans">
@@ -596,8 +621,6 @@ export default function TestEnvironment() {
                         className="bg-slate-900 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       >
                         <option value="javascript">JavaScript (ES6 Node)</option>
-                        <option value="python">Python 3</option>
-                        <option value="cpp">C++ (GCC 17)</option>
                       </select>
                     </div>
 
@@ -617,7 +640,7 @@ export default function TestEnvironment() {
                         className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center transition-colors shadow-md shadow-emerald-600/20 disabled:opacity-50"
                       >
                         {isSubmitting ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-1" />}
-                        Submit & Evaluate (All Cases)
+                        Submit & Evaluate Public Cases
                       </button>
                     </div>
                   </div>
@@ -702,30 +725,14 @@ export default function TestEnvironment() {
             </div>
           </div>
 
-          {/* Proctoring Flag Summary Box */}
-          <div className="bg-slate-950 border border-slate-800 rounded-3xl p-5 shadow-xl">
-            <div className="flex items-center space-x-2 mb-3">
-              <ShieldAlert className="w-4 h-4 text-amber-400" />
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Proctoring Status</h3>
-            </div>
-            <p className="text-[11px] text-slate-400 mb-3">
-              Webcam gaze and browser focus are continuously monitored.
-            </p>
-            <div className="flex items-center justify-between bg-slate-900 p-3 rounded-xl border border-slate-800">
-              <span className="text-xs text-slate-400">Total Proctor Violations:</span>
-              <span className="font-extrabold text-sm text-amber-400">{proctorFlags.length}</span>
-            </div>
-          </div>
-
         </div>
 
       </div>
 
-      {/* Embedded Client-Side AI Proctoring Monitor */}
+      {/* Browser integrity event monitor */}
       <ProctoringMonitor
         attemptId={test.id}
         isProctored={test.is_proctored}
-        onEventLogged={handleProctorEvent}
       />
 
       {/* Confirmation Submit Modal */}
@@ -737,6 +744,7 @@ export default function TestEnvironment() {
             <p className="text-xs text-slate-400 mb-6">
               You have answered {Object.keys(answers).length} out of {questions.length} questions. Are you ready to submit and calculate your placement readiness score?
             </p>
+            {submitError && <p className="mb-4 text-xs font-semibold text-red-400">{submitError}</p>}
             <div className="flex space-x-3">
               <button
                 onClick={() => setShowConfirmModal(false)}
@@ -745,7 +753,7 @@ export default function TestEnvironment() {
                 Return to Test
               </button>
               <button
-                onClick={handleSubmitTest}
+                onClick={() => void handleSubmitTest()}
                 className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-colors shadow-lg"
               >
                 Confirm Submission

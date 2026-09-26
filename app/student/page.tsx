@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/authContext';
 import { DatabaseService } from '@/lib/dbService';
-import { Test, TestAttempt, TestAttempt as AttemptType } from '@/lib/mockData';
+import { Test, TestAttempt, TestAttempt as AttemptType } from '@/lib/types';
 import { 
   Play, 
   Clock, 
@@ -34,20 +34,21 @@ export default function StudentDashboard() {
   }, [user]);
 
   const userDept = user?.department || 'CSE';
-  const userYear = user?.year_of_study || '4th Year';
+  const userYear = (user?.academic_year || user?.year_of_study || '').replace(/\s+Year$/i, '').toLowerCase();
 
   const isTestAllocated = (test: Test) => {
-    const deptMatch = !test.target_department || 
-                      test.target_department === 'All Departments' || 
-                      test.target_department.toLowerCase() === userDept.toLowerCase();
-    const yearMatch = !test.target_year || 
-                      test.target_year === 'All Years' || 
-                      test.target_year.toLowerCase() === userYear.toLowerCase();
+    const deptMatch = !!test.target_department && test.target_department.toLowerCase() === userDept.toLowerCase();
+    const targetYear = (test.target_year || '').replace(/\s+Year$/i, '').toLowerCase();
+    const yearMatch = !!userYear && !!targetYear && targetYear === userYear;
     return deptMatch && yearMatch;
   };
 
   const allocatedTests = tests.filter(isTestAllocated);
-  const dailyPracticeTest = allocatedTests.find((t) => t.type === 'daily_practice') || allocatedTests[0] || tests.find((t) => t.type === 'daily_practice');
+  const completedAttempts = attempts.filter((attempt) => attempt.status !== 'in_progress');
+  const averageScore = completedAttempts.length
+    ? Math.round(completedAttempts.reduce((total, attempt) => total + Number(attempt.score || 0), 0) / completedAttempts.length)
+    : 0;
+  const dailyPracticeTest = allocatedTests.find((t) => t.type === 'daily_practice');
   const weeklyTests = allocatedTests.filter((t) => t.type === 'weekly_assessment');
 
   return (
@@ -65,18 +66,18 @@ export default function StudentDashboard() {
               Welcome back, {user?.full_name?.split(' ')[0] || 'Student'}! 👋
             </h1>
             <p className="mt-2 text-slate-300 max-w-xl text-sm leading-relaxed">
-              Track your daily practice, attempt scheduled mock assessments allocated to {userDept} - {userYear} with live proctoring, and review AI-driven topic recommendations.
+              View department-routed assessments and your recorded performance.
             </p>
           </div>
 
           {/* Quick Stats Pill Header */}
           <div className="flex items-center space-x-4 bg-white/10 backdrop-blur-md border border-white/10 p-4 rounded-2xl">
             <div className="text-center px-3 border-r border-white/10">
-              <span className="block text-2xl font-black text-white">85%</span>
-              <span className="text-[11px] text-slate-300 font-medium">Avg Accuracy</span>
+              <span className="block text-2xl font-black text-white">{averageScore}%</span>
+              <span className="text-[11px] text-slate-300 font-medium">Recorded Avg Score</span>
             </div>
             <div className="text-center px-3 border-r border-white/10">
-              <span className="block text-2xl font-black text-emerald-400">14</span>
+              <span className="block text-2xl font-black text-emerald-400">{user?.current_streak || 0}</span>
               <span className="text-[11px] text-slate-300 font-medium">Daily Streak</span>
             </div>
             <div className="text-center px-3">

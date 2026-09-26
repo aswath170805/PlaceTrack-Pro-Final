@@ -20,6 +20,9 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
   const pathname = request.nextUrl.pathname;
+  if (pathname.startsWith('/admin/proctoring') || pathname.startsWith('/admin/audit-logs')) {
+    return NextResponse.redirect(new URL('/admin/tampering-logs', request.url));
+  }
   const requiredRole = pathname.startsWith('/admin') ? 'admin' : pathname.startsWith('/faculty') ? 'faculty' : 'student';
 
   if (!user) return NextResponse.redirect(new URL('/login', request.url));

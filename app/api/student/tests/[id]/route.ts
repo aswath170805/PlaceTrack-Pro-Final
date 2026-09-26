@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DatabaseService } from '@/lib/dbService';
-import { Question } from '@/lib/mockData';
+import { Question } from '@/lib/types';
 import { requireRole } from '@/lib/supabase/auth';
+import { createClient } from '@/lib/supabase/server';
 
 // Fisher-Yates shuffle helper
 function shuffleArray<T>(array: T[]): T[] {
@@ -13,17 +14,35 @@ function shuffleArray<T>(array: T[]): T[] {
   return arr;
 }
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const testId = params.id;
+    const { id: testId } = await params;
     const student = await requireRole(['student']);
     const department = student.department;
-    const year = student.academic_year || student.year_of_study.replace(' Year', '');
-    const questions = (await DatabaseService.getQuestionsForStudent(department, year)).filter((question) => {
-      const departmentMatch = !department || !question.target_department || question.target_department === 'All Departments' || question.target_department.toLowerCase() === department.toLowerCase();
-      const yearMatch = !year || !question.target_year || question.target_year === 'All Years' || question.target_year.toLowerCase().startsWith(year.toLowerCase());
-      return departmentMatch && yearMatch;
-    });
+    const year = (student.academic_year || student.year_of_study || '').replace(/\s+Year$/i, '').toLowerCase();
+    const tests = await DatabaseService.getTests();
+    const test = tests.find((entry) => entry.id === testId);
+    const targetYear = (test?.target_year || '').replace(/\s+Year$/i, '').toLowerCase();
+    if (!test || test.target_department?.toLowerCase() !== department?.toLowerCase() || targetYear !== year) {
+      return NextResponse.json({ success: false, error: 'This assessment is not allocated to your department and academic year.' }, { status: 403 });
+    }
+
+    const supabase = await createClient();
+    const { data: testQuestionRows, error: testQuestionError } = await supabase
+      .from('test_questions')
+      .select('question_id')
+      .eq('test_id', testId);
+    if (testQuestionError) throw testQuestionError;
+    const assignedQuestionIds = new Set((testQuestionRows || []).map((row) => row.question_id));
+    if (assignedQuestionIds.size === 0) {
+      return NextResponse.json({ success: false, error: 'This assessment has no saved questions assigned yet.' }, { status: 404 });
+    }
+
+    const { error: attendanceError } = await supabase.from('attendance_logs').insert({ student_id: student.id, entry_type: 'assessment_entry' });
+    if (attendanceError) throw attendanceError;
+
+    const questions = (await DatabaseService.getQuestionsForStudent(department, year))
+      .filter((question) => assignedQuestionIds.has(question.id));
 
     // 1. Randomize Question Presentation Order per session
     const randomizedQuestions = shuffleArray(questions);
@@ -36,11 +55,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       delete (safeContent as any).correctAnswer;
       delete (safeContent as any).answerKey;
       delete (safeContent as any).explanation;
-
-      // Randomize MCQ options if present (preserving option text, stripping original key)
-      if (q.type === 'mcq' && Array.isArray(safeContent.options)) {
-        // Create shallow copy before shuffling
-        safeContent.options = shuffleArray(safeContent.options);
+      if (q.type === 'coding' && Array.isArray(safeContent.testCases)) {
+        safeContent.testCases = safeContent.testCases.filter((testCase) => testCase.isPublic !== false);
       }
 
       return {
@@ -52,10 +68,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({
       success: true,
       testId,
+      test,
       sessionSecurityActive: true,
       questions: safeQuestions,
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message }, { status: err.message === 'UNAUTHORIZED' ? 401 : 500 });
   }
 }

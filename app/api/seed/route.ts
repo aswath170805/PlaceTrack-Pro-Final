@@ -1,61 +1,96 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { 
-  MOCK_BATCHES, 
-  MOCK_QUESTION_BANKS, 
-  MOCK_QUESTIONS, 
-  MOCK_TESTS, 
-  MOCK_ATTENDANCE, 
-  MOCK_AUDIT_LOGS 
-} from '@/lib/mockData';
+import { requireRole } from '@/lib/supabase/auth';
 
-export async function GET() {
+const accounts = [
+  {
+    email: '2027eee0001@svce.ac.in',
+    passwordVariable: 'SEED_STUDENT_PASSWORD',
+    fullName: 'Aravind',
+    role: 'student' as const,
+    department: 'EEE',
+    yearOfStudy: '1st Year',
+    academicYear: '1st',
+  },
+  {
+    email: 'balki0017@svce.ac.in',
+    passwordVariable: 'SEED_TEACHER_PASSWORD',
+    fullName: 'Balki',
+    role: 'faculty' as const,
+    department: 'EEE',
+    yearOfStudy: 'N/A',
+    academicYear: null,
+  },
+];
+
+export async function POST() {
   try {
+    const administrator = await requireRole(['admin']);
     const supabase = createAdminClient();
+    const { data: userPage, error: listError } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (listError) throw listError;
 
-    // Seed Batches
-    await supabase.from('batches').upsert(MOCK_BATCHES.map((b) => ({
-      id: b.id,
-      name: b.name,
-    })));
+    const missingPassword = accounts.find((account) => {
+      const exists = userPage.users.some((user) => user.email?.toLowerCase() === account.email);
+      const password = process.env[account.passwordVariable];
+      return !exists && (!password || password.length < 8);
+    });
+    if (missingPassword) {
+      return NextResponse.json(
+        { success: false, error: `Set ${missingPassword.passwordVariable} to a password of at least 8 characters in the server environment to create ${missingPassword.email}.` },
+        { status: 500 },
+      );
+    }
 
-    // Seed Question Banks
-    await supabase.from('question_banks').upsert(MOCK_QUESTION_BANKS.map((qb) => ({
-      id: qb.id,
-      title: qb.title,
-      topic: qb.topic,
-    })));
+    const seededAccounts = [];
+    for (const account of accounts) {
+      const metadata = {
+        full_name: account.fullName,
+        role: account.role,
+        department: account.department,
+        year_of_study: account.yearOfStudy,
+        academic_year: account.academicYear || '4th',
+      };
+      const existingUser = userPage.users.find((user) => user.email?.toLowerCase() === account.email);
+      const { data: authResult, error: authError } = existingUser
+        ? await supabase.auth.admin.updateUserById(existingUser.id, {
+            email_confirm: true,
+            user_metadata: metadata,
+          })
+        : await supabase.auth.admin.createUser({
+            email: account.email,
+            password: process.env[account.passwordVariable]!,
+            email_confirm: true,
+            user_metadata: metadata,
+          });
+      if (authError) throw authError;
+      if (!authResult.user) throw new Error(`Unable to create Auth user ${account.email}.`);
 
-    // Seed Questions
-    await supabase.from('questions').upsert(MOCK_QUESTIONS.map((q) => ({
-      id: q.id,
-      bank_id: q.bank_id,
-      type: q.type,
-      topic: q.topic,
-      difficulty: q.difficulty,
-      content: q.content,
-    })));
+      const { error: profileError } = await supabase.from('profiles').upsert({
+        id: authResult.user.id,
+        full_name: account.fullName,
+        role: account.role,
+        department: account.department,
+        year_of_study: account.yearOfStudy,
+        academic_year: account.academicYear,
+        is_verified: true,
+      });
+      if (profileError) throw profileError;
 
-    // Seed Tests
-    await supabase.from('tests').upsert(MOCK_TESTS.map((t) => ({
-      id: t.id,
-      title: t.title,
-      type: t.type,
-      duration_minutes: t.duration_minutes,
-      is_proctored: t.is_proctored,
-    })));
+      const { error: requestError } = await supabase
+        .from('verification_requests')
+        .update({ status: 'approved', reviewed_by: administrator.id, reviewed_at: new Date().toISOString(), rejection_reason: null })
+        .eq('user_id', authResult.user.id)
+        .eq('status', 'pending');
+      if (requestError) throw requestError;
 
-    // Seed Attendance
-    await supabase.from('attendance').upsert(MOCK_ATTENDANCE.map((a) => ({
-      id: a.id,
-      session_title: a.session_title,
-      status: a.status,
-      absence_reason: a.absence_reason,
-      reviewed_by_faculty: a.reviewed_by_faculty,
-    })));
+      seededAccounts.push({ id: authResult.user.id, email: account.email, role: account.role });
+    }
 
-    return NextResponse.json({ success: true, message: 'Database seeded successfully in Supabase Postgres!' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: true, accounts: seededAccounts });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Account seeding failed.';
+    const status = message === 'UNAUTHORIZED' ? 401 : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
   }
 }

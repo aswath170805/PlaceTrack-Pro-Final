@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/authContext';
 import { DatabaseService } from '@/lib/dbService';
-import { Batch, Test, QuestionBank, AttendanceRecord, TestAttempt } from '@/lib/mockData';
+import { Batch, Test, QuestionBank, AttendanceRecord, TestAttempt, Profile } from '@/lib/types';
 import { 
   PlusCircle, 
   BookOpen, 
@@ -140,31 +140,27 @@ const StudentPerformancePdf = ({ attempt }: { attempt: TestAttempt }) => (
     <Page size="A4" style={pdfStyles.page}>
       <View style={pdfStyles.header}>
         <View>
-          <Text style={pdfStyles.title}>Student Placement Progress Audit</Text>
-          <Text style={pdfStyles.subtitle}>PlaceTrack Pro Assessment Verification</Text>
+          <Text style={pdfStyles.title}>Assessment Attempt Record</Text>
+          <Text style={pdfStyles.subtitle}>PlaceTrack Pro Saved Attempt Data</Text>
         </View>
         <View style={pdfStyles.scoreBadge}>
           <Text style={pdfStyles.scoreText}>{attempt.score}%</Text>
-          <Text style={{ fontSize: 7, color: '#4338ca' }}>Verified Score</Text>
+          <Text style={{ fontSize: 7, color: '#4338ca' }}>Saved Score</Text>
         </View>
       </View>
 
       <View style={pdfStyles.grid}>
         <View style={pdfStyles.gridItem}>
           <Text style={pdfStyles.label}>Student Full Name</Text>
-          <Text style={pdfStyles.value}>{attempt.student_name || 'Alex Johnson'}</Text>
+          <Text style={pdfStyles.value}>{attempt.student_name || `Student ${attempt.student_id}`}</Text>
         </View>
         <View style={pdfStyles.gridItem}>
-          <Text style={pdfStyles.label}>Assessment Assessment</Text>
-          <Text style={pdfStyles.value}>{attempt.test_title || 'Weekly Placement Mock'}</Text>
+          <Text style={pdfStyles.label}>Assessment</Text>
+          <Text style={pdfStyles.value}>{attempt.test_title || `Assessment ${attempt.test_id}`}</Text>
         </View>
         <View style={pdfStyles.gridItem}>
           <Text style={pdfStyles.label}>Attempt ID</Text>
           <Text style={pdfStyles.value}>{attempt.id}</Text>
-        </View>
-        <View style={pdfStyles.gridItem}>
-          <Text style={pdfStyles.label}>Proctoring Flags</Text>
-          <Text style={pdfStyles.value}>{attempt.flag_count || 0} event(s)</Text>
         </View>
         <View style={pdfStyles.gridItem}>
           <Text style={pdfStyles.label}>Submission Date</Text>
@@ -176,24 +172,15 @@ const StudentPerformancePdf = ({ attempt }: { attempt: TestAttempt }) => (
         </View>
       </View>
 
-      <Text style={pdfStyles.sectionTitle}>AI Performance Evaluation & Feedback</Text>
+      <Text style={pdfStyles.sectionTitle}>Recorded Status</Text>
       <View style={pdfStyles.commentBox}>
         <Text style={pdfStyles.commentText}>
-          Candidate demonstrates strong problem-solving proficiency in Core Data Structures and Algorithms. No major behavioral or gaze-away flags registered during test execution. Eligible for Tier-1 Campus Placement Drives.
-        </Text>
-      </View>
-
-      <Text style={pdfStyles.sectionTitle}>Proctoring & Integrity Summary</Text>
-      <View style={{ marginBottom: 15 }}>
-        <Text style={{ fontSize: 9, color: '#475569', lineHeight: 1.5 }}>
-          • Webcam face presence: 100% verified.
-          {"\n"}• Browser focus lock: 0 unauthorized tab switches.
-          {"\n"}• Code evaluation: JavaScript test cases executed cleanly against public and private hidden bounds.
+          {`Attempt status: ${attempt.status}. This report contains saved attempt fields only.`}
         </Text>
       </View>
 
       <Text style={pdfStyles.footer}>
-        Official Academic Verification • PlaceTrack Pro Placement Intelligence System
+        PlaceTrack Pro • Assessment attempt record
       </Text>
     </Page>
   </Document>
@@ -210,6 +197,7 @@ export default function FacultyDashboard() {
   const [questionBanks, setQuestionBanks] = useState<QuestionBank[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [attempts, setAttempts] = useState<TestAttempt[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [isMounted, setIsMounted] = useState<boolean>(false);
 
   useEffect(() => {
@@ -220,37 +208,36 @@ export default function FacultyDashboard() {
       const qb = await DatabaseService.getQuestionBanks();
       const att = await DatabaseService.getAttendanceRecords();
       const atts = await DatabaseService.getTestAttempts();
+      const people = await DatabaseService.getProfiles();
       setTests(t);
       setBatches(b);
       setQuestionBanks(qb);
       setAttendance(att);
       setAttempts(atts);
+      setProfiles(people);
     }
     loadFacultyData();
   }, []);
 
-  const pendingAbsenceCount = attendance.filter((a) => a.status === 'absent' && !a.reviewed_by_faculty).length;
+  const weeklyAnalyticsData = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - index));
+    const dayAttempts = attempts.filter((attempt) => {
+      const submitted = attempt.submitted_at ? new Date(attempt.submitted_at) : null;
+      return submitted?.toDateString() === date.toDateString();
+    });
+    return {
+      day: date.toLocaleDateString(undefined, { weekday: 'short' }),
+      submissionCount: dayAttempts.length,
+      avgScore: dayAttempts.length ? Math.round(dayAttempts.reduce((sum, item) => sum + Number(item.score || 0), 0) / dayAttempts.length) : 0,
+    };
+  });
 
-  // Weekly Bar & Line Graph Data: Percentage of students taking daily tests + average score
-  const weeklyAnalyticsData = [
-    { day: 'Mon', participationRate: 68, avgScore: 74, studentCount: 42 },
-    { day: 'Tue', participationRate: 75, avgScore: 78, studentCount: 51 },
-    { day: 'Wed', participationRate: 88, avgScore: 82, studentCount: 65 },
-    { day: 'Thu', participationRate: 72, avgScore: 76, studentCount: 48 },
-    { day: 'Fri', participationRate: 94, avgScore: 85, studentCount: 72 },
-    { day: 'Sat', participationRate: 80, avgScore: 79, studentCount: 56 },
-    { day: 'Sun', participationRate: 60, avgScore: 72, studentCount: 38 },
-  ];
-
-  // Department Participation Pie Chart Data in various distinct colors
-  const departmentPieData = [
-    { name: 'Computer Science (CSE)', value: 38, count: '142 students' },
-    { name: 'Information Tech (IT)', value: 24, count: '90 students' },
-    { name: 'Electronics (ECE)', value: 18, count: '68 students' },
-    { name: 'Electrical (EEE)', value: 10, count: '38 students' },
-    { name: 'Mechanical (MECH)', value: 6, count: '22 students' },
-    { name: 'Civil & Bio (CIVIL)', value: 4, count: '15 students' },
-  ];
+  const departmentPieData = ['CSE', 'AI', 'EEE', 'ECE', 'IT'].map((department) => {
+    const count = profiles.filter((profile) => profile.role === 'student' && profile.department === department).length;
+    return { name: department, value: count, count: `${count} students` };
+  });
 
   return (
     <div className="min-h-screen bg-slate-50 pb-16 font-sans">
@@ -331,31 +318,29 @@ export default function FacultyDashboard() {
               <CalendarCheck className="w-6 h-6" />
             </div>
             <div>
-              <span className="block text-2xl font-black text-slate-900">{pendingAbsenceCount}</span>
-              <span className="text-xs text-amber-600 font-bold">Pending Absence Reviews</span>
+              <span className="block text-2xl font-black text-slate-900">{attendance.length}</span>
+              <span className="text-xs text-amber-600 font-bold">Attendance Entries</span>
             </div>
           </Link>
 
         </div>
 
-        {/* Analytics Section: Weekly Bar & Line Chart + Department Pie Chart */}
+        {/* Recorded assessment activity and student counts */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* Weekly Bar and Line Graph (% of students taking daily test & scores) */}
+          {/* Weekly submission counts and saved scores */}
           <div className="lg:col-span-2 bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
               <div>
                 <h3 className="text-base font-black text-slate-900 flex items-center">
                   <TrendingUp className="w-5 h-5 mr-2 text-indigo-600" />
-                  Weekly Assessment Participation & Average Score
+                  Daily Assessment Submissions & Average Score
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Dual-axis chart showing daily student turnout (%) alongside average batch score (%)
+                  Recorded completed attempts for each day
                 </p>
               </div>
-              <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg">
-                7-Day Rolling Trend
-              </span>
+              <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg">Last 7 days</span>
             </div>
 
             <div className="h-72 w-full pt-2">
@@ -363,13 +348,13 @@ export default function FacultyDashboard() {
                 <BarChart data={weeklyAnalyticsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                   <XAxis dataKey="day" stroke="#64748b" fontSize={11} />
-                  <YAxis yAxisId="left" stroke="#64748b" fontSize={11} domain={[0, 100]} />
+                  <YAxis yAxisId="left" stroke="#64748b" fontSize={11} allowDecimals={false} />
                   <YAxis yAxisId="right" orientation="right" stroke="#64748b" fontSize={11} domain={[0, 100]} />
                   <Tooltip 
                     contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '11px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} 
                   />
                   <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-                  <Bar yAxisId="left" dataKey="participationRate" fill="#4f46e5" name="Participation Rate (%)" radius={[6, 6, 0, 0]} />
+                  <Bar yAxisId="left" dataKey="submissionCount" fill="#4f46e5" name="Submissions" radius={[6, 6, 0, 0]} />
                   <Line yAxisId="right" type="monotone" dataKey="avgScore" stroke="#10b981" strokeWidth={3} name="Avg Score (%)" dot={{ r: 4, fill: '#10b981' }} />
                 </BarChart>
               </ResponsiveContainer>
@@ -383,7 +368,7 @@ export default function FacultyDashboard() {
                 <PieIcon className="w-5 h-5 mr-2 text-indigo-600" />
                 Department Breakdown
               </h3>
-              <p className="text-xs text-slate-500">Student participation by academic department</p>
+                <p className="text-xs text-slate-500">Registered student accounts by department</p>
             </div>
 
             <div className="h-56 relative flex items-center justify-center">
@@ -404,7 +389,7 @@ export default function FacultyDashboard() {
                   </Pie>
                   <Tooltip 
                     contentStyle={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '11px' }}
-                    formatter={(value: any) => [`${value}% of total takers`, 'Share']}
+                    formatter={(value: any) => [`${value} students`, 'Count']}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -416,7 +401,7 @@ export default function FacultyDashboard() {
                 <div key={idx} className="flex items-center space-x-1.5">
                   <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: DEPT_COLORS[idx % DEPT_COLORS.length] }} />
                   <span className="truncate text-slate-700 font-medium">{dept.name.split(' ')[0]}</span>
-                  <span className="text-slate-400 font-bold">({dept.value}%)</span>
+                  <span className="text-slate-400 font-bold">({dept.value})</span>
                 </div>
               ))}
             </div>
@@ -457,10 +442,10 @@ export default function FacultyDashboard() {
                 {attempts.map((att) => (
                   <tr key={att.id} className="hover:bg-slate-50 transition-colors">
                     <td className="py-3.5 px-4 font-bold text-slate-900">
-                      {att.student_name || 'Alex Johnson'}
+                      {att.student_name || `Student ${att.student_id}`}
                     </td>
                     <td className="py-3.5 px-4 text-slate-600">
-                      {att.test_title || 'TCS & Wipro Prep Mock'}
+                      {att.test_title || tests.find((test) => test.id === att.test_id)?.title || `Assessment ${att.test_id}`}
                     </td>
                     <td className="py-3.5 px-4">
                       <span className={`font-black text-sm ${
@@ -476,11 +461,11 @@ export default function FacultyDashboard() {
                           {att.flag_count} Flagged
                         </span>
                       ) : (
-                        <span className="text-slate-400 font-medium">Clean Record</span>
+                        <span className="text-slate-400 font-medium">Not tracked</span>
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-slate-500">
-                      {att.submitted_at ? new Date(att.submitted_at).toLocaleDateString() : 'Today'}
+                      {att.submitted_at ? new Date(att.submitted_at).toLocaleDateString() : 'Not submitted'}
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       {isMounted ? (
@@ -521,12 +506,8 @@ export default function FacultyDashboard() {
                 <div className="flex justify-between items-start">
                   <h4 className="font-bold text-slate-900 text-sm">{b.name}</h4>
                   <span className="text-[11px] bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded">
-                    {b.student_count || 45} Students
+                    {b.student_count ?? 0} Students
                   </span>
-                </div>
-                <div className="space-y-1 text-xs text-slate-500">
-                  <p>Average Mock Score: <strong className="text-slate-800">78%</strong></p>
-                  <p>Proctoring Violations: <strong className="text-amber-600">2 low severity</strong></p>
                 </div>
                 <Link
                   href="/faculty/attendance"

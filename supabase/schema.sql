@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   department TEXT,
   year_of_study TEXT,
   batch_id UUID,
+  is_verified BOOLEAN NOT NULL DEFAULT false,
+  is_super_admin BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -146,6 +148,9 @@ $$ LANGUAGE sql STABLE SECURITY DEFINER;
 -- PROFILES: Users read self; Faculty/Admin read all.
 CREATE POLICY "Users view own profile" ON public.profiles FOR SELECT USING (auth.uid() = id OR public.get_user_role() IN ('faculty', 'admin'));
 CREATE POLICY "Users update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id OR public.get_user_role() = 'admin');
+CREATE POLICY "Super admins delete profiles" ON public.profiles FOR DELETE USING (
+  EXISTS (SELECT 1 FROM public.profiles requester WHERE requester.id = auth.uid() AND requester.is_super_admin = true)
+);
 
 -- BATCHES: Authenticated read; Faculty/Admin manage.
 CREATE POLICY "All authenticated users view batches" ON public.batches FOR SELECT USING (auth.role() = 'authenticated');

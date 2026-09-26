@@ -5,7 +5,7 @@ import Navbar from "@/components/Navbar";
 
 export const metadata: Metadata = {
   title: "PlaceTrack Pro — Placement Preparation & Assessment System",
-  description: "Web-based placement preparation portal for students, faculty, and admins with client-side AI proctoring and real-time monitoring.",
+  description: "Placement preparation and assessment portal for students, faculty, and administrators.",
 };
 
 export default function RootLayout({

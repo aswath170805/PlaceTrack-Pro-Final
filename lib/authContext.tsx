@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Profile } from '@/lib/mockData';
+import { Profile } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 
 async function logStudentAttendance(studentId: string) {
@@ -9,7 +9,7 @@ async function logStudentAttendance(studentId: string) {
     await fetch('/api/attendance/log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ studentId, sessionTitle: 'Student portal login' }),
+      body: JSON.stringify({ entryType: 'portal_login' }),
     });
   } catch (error) {
     console.warn('Attendance logging unavailable', error);
@@ -24,8 +24,8 @@ interface AuthContextType {
   refreshSession: () => Promise<void>;
   isAdminAccessVisible: boolean;
   isFacultyAccessVisible: boolean;
-  signInWithEmail: (email: string, pass: string) => Promise<{ success: boolean; role?: 'student' | 'faculty' | 'admin'; error?: string }>;
-  signUpWithEmail: (data: { email: string; pass: string; fullName: string; role: 'student' | 'faculty'; department: string; yearOfStudy?: string; batchId?: string }) => Promise<{ success: boolean; error?: string }>;
+  signInWithEmail: (email: string, pass: string) => Promise<{ success: boolean; role?: 'student' | 'faculty' | 'admin'; isVerified?: boolean; error?: string }>;
+  signUpWithEmail: (data: { email: string; pass: string; fullName: string; role: 'student' | 'faculty'; department: string; yearOfStudy?: string }) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
 }
 
@@ -79,14 +79,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const handleAccessHotkey = (event: KeyboardEvent) => {
-      if (!event.altKey) return;
+      if (typeof event.key !== 'string') return;
+      const key = event.key.toLowerCase();
+      const adminShortcut = (event.altKey && key === 'q') || (event.ctrlKey && event.altKey && event.shiftKey && key === 'a');
+      const facultyShortcut = (event.altKey && key === 't') || (event.ctrlKey && event.altKey && event.shiftKey && key === 'b');
 
-      if (event.key.toLowerCase() === 't') {
+      if (adminShortcut) {
         event.preventDefault();
         setIsAdminAccessVisible((visible) => !visible);
       }
 
-      if (event.key.toLowerCase() === 'q') {
+      if (facultyShortcut) {
         event.preventDefault();
         setIsFacultyAccessVisible((visible) => !visible);
       }
@@ -111,6 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       let authenticatedRole: 'student' | 'faculty' | 'admin' | undefined;
+      let isVerified: boolean | undefined;
       const supabase = createClient();
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
       if (error) throw error;
@@ -118,6 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const { data: profile } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
         if (profile) {
           authenticatedRole = profile.role as 'student' | 'faculty' | 'admin';
+          isVerified = profile.is_verified === true;
           setUser(profile as Profile);
           setRole(profile.role as any);
           if (profile.role === 'student') void logStudentAttendance(profile.id);
@@ -127,14 +132,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       setIsLoading(false);
-      return { success: true, role: authenticatedRole };
+      return { success: true, role: authenticatedRole, isVerified };
     } catch (e: any) {
       setIsLoading(false);
       return { success: false, error: e?.message || 'Invalid credentials.' };
     }
   };
 
-  const signUpWithEmail = async (data: { email: string; pass: string; fullName: string; role: 'student' | 'faculty'; department: string; yearOfStudy?: string; batchId?: string }) => {
+  const signUpWithEmail = async (data: { email: string; pass: string; fullName: string; role: 'student' | 'faculty'; department: string; yearOfStudy?: string }) => {
     setIsLoading(true);
     try {
       const supabase = createClient();
@@ -152,22 +157,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       });
       if (error) throw error;
-
-      const newProfile: Profile = {
-        id: authRes.user?.id || 'u-' + Math.random().toString(36).substring(2, 9),
-        full_name: data.fullName,
-        role: data.role,
-        department: data.department,
-        year_of_study: data.yearOfStudy || 'Final Year',
-        academic_year: (data.yearOfStudy || '4th').replace(' Year', ''),
-        batch_id: data.batchId,
-        created_at: new Date().toISOString(),
-      };
+      if (!authRes.user) throw new Error('Supabase did not create an account.');
 
       setIsLoading(false);
       return { success: true };
     } catch (e: any) {
       setIsLoading(false);
+      const message = String(e?.message || '');
+      if (e?.status === 429 || e?.code === 'over_email_send_rate_limit' || /email rate limit exceeded/i.test(message)) {
+        return {
+          success: false,
+          error: 'Supabase has temporarily limited confirmation emails for this project. Wait for the limit to reset, then try again.',
+        };
+      }
+      if (/user already registered|already exists/i.test(message)) {
+        return { success: false, error: 'An account may already exist for this email. Try signing in instead.' };
+      }
       return { success: false, error: e?.message || 'Registration failed.' };
     }
   };

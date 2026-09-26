@@ -1,36 +1,30 @@
 'use client';
 
-import React, { useState } from 'react';
-import { MOCK_ATTENDANCE, AttendanceRecord } from '@/lib/mockData';
-import { CalendarCheck, CheckCircle2, XCircle, Send, Clock, ShieldAlert } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AttendanceRecord } from '@/lib/types';
+import { CalendarCheck, Clock, AlertCircle } from 'lucide-react';
 
 export default function StudentAttendancePage() {
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(MOCK_ATTENDANCE);
-  const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(null);
-  const [reasonInput, setReasonInput] = useState<string>('');
-  const [successToast, setSuccessToast] = useState<boolean>(false);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const handleOpenReasonModal = (record: AttendanceRecord) => {
-    setSelectedRecord(record);
-    setReasonInput(record.absence_reason || '');
-  };
-
-  const handleSubmitReason = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedRecord) return;
-
-    setAttendanceRecords((prev) =>
-      prev.map((rec) =>
-        rec.id === selectedRecord.id
-          ? { ...rec, absence_reason: reasonInput, reviewed_by_faculty: false }
-          : rec
-      )
-    );
-
-    setSelectedRecord(null);
-    setSuccessToast(true);
-    setTimeout(() => setSuccessToast(false), 4000);
-  };
+  useEffect(() => {
+    fetch('/api/attendance/log')
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Unable to load attendance.');
+        setAttendanceRecords(result.records.map((record: { id: string; student_id: string; entry_type: string; login_timestamp: string }) => ({
+          id: record.id,
+          student_id: record.student_id,
+          session_id: record.id,
+          session_title: record.entry_type === 'assessment_entry' ? 'Assessment entry' : 'Portal login',
+          status: 'present' as const,
+          reviewed_by_faculty: false,
+          created_at: record.login_timestamp,
+        })));
+      })
+      .catch((error) => setLoadError(error instanceof Error ? error.message : 'Unable to load attendance.'));
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4 sm:px-6 lg:px-8">
@@ -43,16 +37,10 @@ export default function StudentAttendancePage() {
             <span>Placement Attendance Module</span>
           </div>
           <h1 className="text-2xl font-black text-slate-900">Placement Class Attendance History</h1>
-          <p className="text-xs text-slate-500">Track your attendance and submit absence reason requests for faculty review</p>
+          <p className="text-xs text-slate-500">Attendance is recorded when you sign in or enter an assessment.</p>
         </div>
 
-        {/* Success Toast */}
-        {successToast && (
-          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 font-medium flex items-center space-x-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-            <span>Absence reason successfully submitted and routed to Faculty for review!</span>
-          </div>
-        )}
+        {loadError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-800"><AlertCircle className="mr-2 inline h-4 w-4" />{loadError}</div>}
 
         {/* Attendance Timeline Table */}
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
@@ -62,6 +50,7 @@ export default function StudentAttendancePage() {
           </div>
 
           <div className="divide-y divide-slate-100">
+            {attendanceRecords.length === 0 && !loadError && <p className="p-6 text-sm text-slate-500">No attendance entries yet.</p>}
             {attendanceRecords.map((record) => (
               <div key={record.id} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors">
                 <div className="space-y-1">
@@ -88,63 +77,12 @@ export default function StudentAttendancePage() {
                   )}
                 </div>
 
-                {record.status === 'absent' && (
-                  <button
-                    onClick={() => handleOpenReasonModal(record)}
-                    className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors shrink-0"
-                  >
-                    <Send className="w-3.5 h-3.5 mr-1.5" />
-                    {record.absence_reason ? 'Edit Reason' : 'Submit Reason'}
-                  </button>
-                )}
               </div>
             ))}
           </div>
         </div>
 
       </div>
-
-      {/* Submit Reason Modal */}
-      {selectedRecord && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <form onSubmit={handleSubmitReason} className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-900">Submit Absence Reason</h3>
-            <p className="text-xs text-slate-500">
-              Session: <strong>{selectedRecord.session_title}</strong>
-            </p>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Detailed Reason for Absence
-              </label>
-              <textarea
-                required
-                rows={4}
-                value={reasonInput}
-                onChange={(e) => setReasonInput(e.target.value)}
-                placeholder="e.g. Attended Hackathon Finals / Medical leave with certificate..."
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
-            </div>
-
-            <div className="flex space-x-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setSelectedRecord(null)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors shadow-md"
-              >
-                Submit for Faculty Review
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
     </div>
   );
