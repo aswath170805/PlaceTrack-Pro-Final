@@ -7,6 +7,7 @@ import {
   Test,
 } from '@/lib/types';
 import ProctoringMonitor from '@/components/proctoring/ProctoringMonitor';
+import { formatAssessmentTimeIST } from '@/lib/assessmentSchedule';
 import { 
   Clock, 
   ShieldAlert, 
@@ -74,6 +75,9 @@ export default function TestEnvironment() {
   const [currentIdx, setCurrentIdx] = useState<number>(0);
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [timeLeft, setTimeLeft] = useState<number>(0);
+  const [attemptId, setAttemptId] = useState<string | null>(null);
+  const [deadlineAt, setDeadlineAt] = useState<string | null>(null);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [isSaved, setIsSaved] = useState<boolean>(true);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
 
@@ -87,6 +91,7 @@ export default function TestEnvironment() {
   const [codeCaseResults, setCodeCaseResults] = useState<Record<string, boolean>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const submitTestRef = useRef<((force?: boolean) => Promise<void>) | null>(null);
+  const autoSubmitStartedRef = useRef(false);
   const [evaluationResults, setEvaluationResults] = useState<{
     total: number;
     passed: number;
@@ -107,22 +112,30 @@ export default function TestEnvironment() {
   useEffect(() => {
     let isActive = true;
     setIsLoadingQuestions(true);
-    fetch(`/api/student/tests/${testId}`)
-      .then(async (response) => {
+    autoSubmitStartedRef.current = false;
+    (async () => {
+      try {
+        const startResponse = await fetch(`/api/student/tests/${testId}/start`, { method: 'POST' });
+        const startResult = await startResponse.json();
+        if (!startResponse.ok || !startResult.success) throw new Error(startResult.error || 'Unable to start this assessment.');
+        if (!isActive) return;
+        setAttemptId(startResult.attemptId as string);
+        setDeadlineAt(startResult.deadlineAt as string);
+        setServerClockOffsetMs(Date.parse(startResult.serverNow) - Date.now());
+
+        const response = await fetch(`/api/student/tests/${testId}`);
         const result = await response.json();
         if (!response.ok || !result.success) throw new Error(result.error || 'Unable to load this assessment.');
         if (!isActive) return;
         setTest(result.test as Test);
-        setTimeLeft((result.test as Test).duration_minutes * 60);
         setQuestions(result.questions as Question[]);
         setLoadError(null);
-      })
-      .catch((error) => {
-        if (isActive) setLoadError(error.message || 'Unable to load this assessment.');
-      })
-      .finally(() => {
+      } catch (error) {
+        if (isActive) setLoadError(error instanceof Error ? error.message : 'Unable to load this assessment.');
+      } finally {
         if (isActive) setIsLoadingQuestions(false);
-      });
+      }
+    })();
     return () => { isActive = false; };
   }, [testId]);
 
@@ -139,20 +152,21 @@ export default function TestEnvironment() {
 
   // Timer Countdown Effect
   useEffect(() => {
-    if (isLoadingQuestions || loadError || !test || questions.length === 0) return;
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          void submitTestRef.current?.(true);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    if (isLoadingQuestions || loadError || !test || !attemptId || !deadlineAt || questions.length === 0) return;
+    const updateCountdown = () => {
+      const remaining = Math.max(0, Math.ceil((Date.parse(deadlineAt) - (Date.now() + serverClockOffsetMs)) / 1000));
+      setTimeLeft(remaining);
+      if (remaining === 0 && !autoSubmitStartedRef.current) {
+        autoSubmitStartedRef.current = true;
+        clearInterval(timer);
+        void submitTestRef.current?.(true);
+      }
+    };
+    const timer = window.setInterval(updateCountdown, 1000);
+    updateCountdown();
 
     return () => clearInterval(timer);
-  }, [isLoadingQuestions, loadError, questions.length, test]);
+  }, [isLoadingQuestions, loadError, questions.length, test, attemptId, deadlineAt, serverClockOffsetMs]);
 
   // Format Time
   const formatTime = (seconds: number) => {
@@ -285,17 +299,19 @@ export default function TestEnvironment() {
 
   // Submit Test Handler
   const handleSubmitTest = async (force = false) => {
+    if (isSubmitting || !attemptId) return;
     if (!force && questions.some((question) => question.type === 'coding' && codeCaseResults[question.id] !== true)) {
       setSubmitError('Run and pass the public test cases for each coding question before submitting.');
       setShowConfirmModal(true);
       return;
     }
 
+    setIsSubmitting(true);
     try {
       const response = await fetch(`/api/student/tests/${testId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers }),
+        body: JSON.stringify({ answers, attemptId }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || 'Unable to submit this assessment.');
@@ -303,6 +319,8 @@ export default function TestEnvironment() {
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : 'Unable to submit this assessment.');
       setShowConfirmModal(true);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -328,6 +346,7 @@ export default function TestEnvironment() {
             {test.type.replace('_', ' ')}
           </div>
           <h1 className="text-base font-bold text-white truncate max-w-md">{test.title}</h1>
+          <span className="hidden xl:inline text-[11px] text-slate-400">Ends {formatAssessmentTimeIST(test.end_time)}</span>
         </div>
 
         {/* Timer & Auto-Save */}
@@ -344,6 +363,7 @@ export default function TestEnvironment() {
 
           <button
             onClick={() => setShowConfirmModal(true)}
+            disabled={isSubmitting}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg transition-colors flex items-center"
           >
             <Send className="w-3.5 h-3.5 mr-1.5" />

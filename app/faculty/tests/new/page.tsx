@@ -8,8 +8,8 @@ import {
   Question 
 } from '@/lib/types';
 import { DatabaseService } from '@/lib/dbService';
-import { useAuth } from '@/lib/authContext';
 import { questionMatchesAssessment } from '@/lib/assessmentTargeting';
+import { istDateTimeLocalToUtc } from '@/lib/assessmentSchedule';
 import { 
   FileCheck2, 
   ShieldAlert, 
@@ -34,12 +34,13 @@ interface AssessmentSession {
 
 export default function CreateTestPage() {
   const router = useRouter();
-  const { user } = useAuth();
-
   const [title, setTitle] = useState<string>('');
   const [type, setType] = useState<'daily_practice' | 'weekly_assessment' | 'custom'>('weekly_assessment');
   const [duration, setDuration] = useState<number>(45);
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [isProctored, setIsProctored] = useState<boolean>(true);
+  const [isUnified, setIsUnified] = useState<boolean>(false);
   const [questionBanks, setQuestionBanks] = useState<QuestionBank[]>([]);
   const [targetDepartment, setTargetDepartment] = useState<string>('All Departments');
   const [targetYear, setTargetYear] = useState<string>('All Years');
@@ -81,20 +82,33 @@ export default function CreateTestPage() {
       const availableQuestions = await DatabaseService.getQuestions();
       const selectedQuestionIds = availableQuestions
         .filter((question) => selectedBankIds.includes(question.bank_id))
-        .filter((question) => questionMatchesAssessment(question, targetDepartment, targetYear))
+        .filter((question) => questionMatchesAssessment(question, targetDepartment, targetYear, isUnified))
         .map((question) => question.id);
       if (selectedQuestionIds.length === 0) throw new Error('Selected banks contain no questions compatible with this department and year target.');
+      const startsAt = istDateTimeLocalToUtc(startTime);
+      const endsAt = istDateTimeLocalToUtc(endTime);
+      if (!startsAt || !endsAt) throw new Error('Enter a valid start and end time in IST.');
+      if (Date.parse(startsAt) < Date.now()) throw new Error('The assessment start time must be now or later.');
+      if (Date.parse(endsAt) <= Date.parse(startsAt)) throw new Error('The end time must be later than the start time.');
 
-      const created = await DatabaseService.createTest({
-        title,
-        type,
-        duration_minutes: duration,
-        is_proctored: isProctored,
-        created_by: user?.id || '',
-        target_department: targetDepartment,
-        target_year: targetYear,
+      const response = await fetch('/api/faculty/tests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          type,
+          duration_minutes: duration,
+          is_proctored: isProctored,
+          is_unified: isUnified,
+          target_department: targetDepartment,
+          target_year: targetYear,
+          start_time: startsAt,
+          end_time: endsAt,
+          question_ids: selectedQuestionIds,
+        }),
       });
-      await DatabaseService.attachQuestionsToTest(created.id, selectedQuestionIds);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) throw new Error(result.error || 'Unable to schedule assessment.');
 
       setSuccessMessage('Assessment successfully configured and scheduled! Redirecting to Hub...');
       setTimeout(() => {
@@ -191,7 +205,7 @@ export default function CreateTestPage() {
               </div>
             </div>
 
-            {/* Target Department, Target Year & Duration */}
+            {/* Audience, schedule, and duration */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">Total Duration (Minutes)</label>
@@ -238,6 +252,29 @@ export default function CreateTestPage() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">Start Time (IST)</label>
+                <input
+                  required
+                  type="datetime-local"
+                  value={startTime}
+                  onChange={(event) => setStartTime(event.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">End Time (IST)</label>
+                <input
+                  required
+                  type="datetime-local"
+                  value={endTime}
+                  onChange={(event) => setEndTime(event.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+                />
+              </div>
+            </div>
+
             {/* Browser integrity event logging */}
             <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200 flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -254,6 +291,19 @@ export default function CreateTestPage() {
                 className="w-5 h-5 text-amber-600 rounded focus:ring-amber-500"
               />
             </div>
+
+            <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4">
+              <input
+                type="checkbox"
+                checked={isUnified}
+                onChange={(event) => setIsUnified(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span>
+                <span className="block text-xs font-bold text-slate-800">Unified/Common Assessment</span>
+                <span className="mt-1 block text-[11px] text-slate-500">Require the same question set for every student in the selected audience.</span>
+              </span>
+            </label>
 
             {errorMessage && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">{errorMessage}</p>}
 

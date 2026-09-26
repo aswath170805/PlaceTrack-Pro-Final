@@ -35,7 +35,11 @@ function questionScopeMatchesAudience(questionTarget: string | undefined, audien
   return isWildcardTarget(questionTarget, kind) || normalizeTarget(questionTarget) === normalizeTarget(audienceTarget);
 }
 
-export function questionMatchesAssessment(question: Question, targetDepartment: string, targetYear: string) {
-  return questionScopeMatchesAudience(question.target_department, targetDepartment, 'department')
-    && questionScopeMatchesAudience(question.target_year, targetYear, 'year');
+export function questionMatchesAssessment(question: Question, targetDepartment: string, targetYear: string, requireUniform = false) {
+  const departmentMatches = questionScopeMatchesAudience(question.target_department, targetDepartment, 'department');
+  const yearMatches = questionScopeMatchesAudience(question.target_year, targetYear, 'year');
+  if (!departmentMatches || !yearMatches) return false;
+  if (requireUniform && isWildcardTarget(targetDepartment, 'department') && !isWildcardTarget(question.target_department, 'department')) return false;
+  if (requireUniform && isWildcardTarget(targetYear, 'year') && !isWildcardTarget(question.target_year, 'year')) return false;
+  return true;
 }

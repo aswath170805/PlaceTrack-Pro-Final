@@ -60,8 +60,11 @@ CREATE TABLE IF NOT EXISTS public.tests (
   duration_minutes INT NOT NULL DEFAULT 60,
   created_by UUID REFERENCES public.profiles(id),
   is_proctored BOOLEAN DEFAULT true,
+  is_unified BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.tests ADD COLUMN IF NOT EXISTS is_unified BOOLEAN NOT NULL DEFAULT false;
 
 -- 6. Test Questions Junction
 CREATE TABLE IF NOT EXISTS public.test_questions (

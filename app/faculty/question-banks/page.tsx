@@ -31,6 +31,8 @@ export default function QuestionBanksPage() {
   const [selectedBankId, setSelectedBankId] = useState<string>('');
   const [isLoadingBanks, setIsLoadingBanks] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [deletingBankId, setDeletingBankId] = useState<string | null>(null);
+  const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
 
   // New Question Bank Modal state
   const [showBankModal, setShowBankModal] = useState<boolean>(false);
@@ -130,8 +132,40 @@ export default function QuestionBanksPage() {
     setShowQModal(true);
   };
 
-  const handleDeleteQuestion = (id: string) => {
-    setQuestions(questions.filter((q) => q.id !== id));
+  const handleDeleteQuestion = async (question: Question) => {
+    if (!window.confirm('Delete this question? It will also be removed from any assessment that uses it.')) return;
+    setDeletingQuestionId(question.id);
+    setLoadError(null);
+    try {
+      const response = await fetch(`/api/faculty/questions/${question.id}`, { method: 'DELETE' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) throw new Error(result.error || 'Unable to delete question.');
+      setQuestions((previous) => previous.filter((entry) => entry.id !== question.id));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to delete question.');
+    } finally {
+      setDeletingQuestionId(null);
+    }
+  };
+
+  const handleDeleteBank = async (bank: QuestionBank) => {
+    const questionCount = questions.filter((question) => question.bank_id === bank.id).length;
+    if (!window.confirm(`Delete "${bank.title}" and its ${questionCount} question(s)? Questions will also be removed from assessments that use them.`)) return;
+    setDeletingBankId(bank.id);
+    setLoadError(null);
+    try {
+      const response = await fetch(`/api/faculty/question-banks/${bank.id}`, { method: 'DELETE' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) throw new Error(result.error || 'Unable to delete question bank.');
+      const remainingBanks = banks.filter((entry) => entry.id !== bank.id);
+      setBanks(remainingBanks);
+      setQuestions((previous) => previous.filter((question) => question.bank_id !== bank.id));
+      if (selectedBankId === bank.id) setSelectedBankId(remainingBanks[0]?.id || '');
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to delete question bank.');
+    } finally {
+      setDeletingBankId(null);
+    }
   };
 
   const handleSaveQuestion = async (e: React.FormEvent) => {
@@ -229,6 +263,8 @@ export default function QuestionBanksPage() {
           </div>
         </div>
 
+        {loadError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">{loadError}</p>}
+
         {/* Workspace Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           
@@ -236,35 +272,37 @@ export default function QuestionBanksPage() {
           <div className="lg:col-span-1 space-y-3">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">Available Banks</h3>
             {banks.map((bank) => (
-              <button
-                key={bank.id}
-                onClick={() => setSelectedBankId(bank.id)}
-                className={`w-full text-left p-4 rounded-2xl border text-xs font-medium transition-all ${
-                  selectedBankId === bank.id
-                    ? 'bg-slate-900 border-slate-800 text-white shadow-lg'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="block font-bold text-sm truncate">{bank.title}</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                    selectedBankId === bank.id ? 'bg-indigo-500/30 text-indigo-200' : 'bg-indigo-50 text-indigo-700'
-                  }`}>
-                    {bank.target_department || 'All Depts'}
+              <div key={bank.id} className={`rounded-2xl border text-xs font-medium transition-all ${
+                selectedBankId === bank.id ? 'bg-slate-900 border-slate-800 text-white shadow-lg' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+              }`}>
+                <button type="button" onClick={() => setSelectedBankId(bank.id)} className="w-full text-left p-4">
+                  <span className="block font-bold text-sm truncate mb-1">{bank.title}</span>
+                  <span className="flex flex-wrap gap-1.5 mb-2">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${selectedBankId === bank.id ? 'bg-indigo-500/30 text-indigo-200' : 'bg-indigo-50 text-indigo-700'}`}>
+                      {bank.target_department || 'All Depts'}
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${selectedBankId === bank.id ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                      {bank.target_year || 'All Years'}
+                    </span>
                   </span>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                    selectedBankId === bank.id ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'
-                  }`}>
-                    {bank.target_year || 'All Years'}
+                  <span className="flex justify-between items-center text-[10px] opacity-75">
+                    <span>Topic: {bank.topic}</span>
+                    <span className="font-mono bg-white/10 px-2 py-0.5 rounded">{questions.filter((question) => question.bank_id === bank.id).length} questions</span>
                   </span>
+                </button>
+                <div className="px-3 pb-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteBank(bank)}
+                    disabled={deletingBankId !== null || deletingQuestionId !== null}
+                    title="Delete question bank and all its questions"
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${selectedBankId === bank.id ? 'border-red-400/40 text-red-200 hover:bg-red-500/20' : 'border-red-200 text-red-700 hover:bg-red-50'}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    {deletingBankId === bank.id ? 'Deleting...' : 'Delete bank'}
+                  </button>
                 </div>
-                <div className="flex justify-between items-center text-[10px] opacity-75">
-                  <span>Topic: {bank.topic}</span>
-                  <span className="font-mono bg-white/10 px-2 py-0.5 rounded">{questions.filter((q) => q.bank_id === bank.id).length} questions</span>
-                </div>
-              </button>
+              </div>
             ))}
           </div>
 
@@ -339,11 +377,12 @@ export default function QuestionBanksPage() {
                           <Edit3 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDeleteQuestion(q.id)}
+                          onClick={() => void handleDeleteQuestion(q)}
+                          disabled={deletingQuestionId !== null || deletingBankId !== null}
                           className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           title="Delete Question"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          {deletingQuestionId === q.id ? <span className="text-[10px]">...</span> : <Trash2 className="w-4 h-4" />}
                         </button>
                       </div>
                     </div>

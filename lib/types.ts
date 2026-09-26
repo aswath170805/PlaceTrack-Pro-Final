@@ -56,11 +56,12 @@ export interface Test {
   type: 'daily_practice' | 'weekly_assessment' | 'custom';
   batch_id?: string;
   batch_name?: string;
-  start_time: string;
-  end_time: string;
+  start_time?: string | null;
+  end_time?: string | null;
   duration_minutes: number;
   created_by: string;
   is_proctored: boolean;
+  is_unified?: boolean;
   question_count?: number;
   target_department?: string;
   target_year?: string;

@@ -3,20 +3,50 @@ import { DatabaseService } from '@/lib/dbService';
 import { requireRole } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/server';
 import { assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
+import { getAssessmentDeadline, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: testId } = await params;
     const student = await requireRole(['student']);
     const body = await req.json();
-    const { answers } = body;
+    const { answers, attemptId } = body;
+    if (typeof attemptId !== 'string' || !attemptId || !answers || typeof answers !== 'object' || Array.isArray(answers)) {
+      return NextResponse.json({ success: false, error: 'A valid attempt and answer set are required.' }, { status: 400 });
+    }
 
     const test = (await DatabaseService.getTests()).find((entry) => entry.id === testId);
     if (!test || !assessmentMatchesStudent(test, student)) {
       return NextResponse.json({ success: false, error: 'This assessment is not allocated to your department and academic year.' }, { status: 403 });
     }
+    const windowStatus = getAssessmentWindowStatus(test);
+    if (windowStatus === 'unscheduled') {
+      return NextResponse.json({ success: false, error: 'This assessment does not have a valid start and end time.' }, { status: 409 });
+    }
+    if (windowStatus === 'upcoming') {
+      return NextResponse.json({ success: false, error: 'This assessment has not opened yet.' }, { status: 403 });
+    }
 
     const supabase = await createClient();
+    const { data: attempt, error: attemptLookupError } = await supabase
+      .from('test_attempts')
+      .select('id, started_at, status')
+      .eq('id', attemptId)
+      .eq('test_id', testId)
+      .eq('student_id', student.id)
+      .maybeSingle();
+    if (attemptLookupError) throw attemptLookupError;
+    if (!attempt || attempt.status !== 'in_progress') {
+      return NextResponse.json({ success: false, error: 'This assessment attempt is no longer active.' }, { status: 409 });
+    }
+    const attemptStartedAt = Date.parse(attempt.started_at);
+    if (attemptStartedAt < Date.parse(test.start_time || '') || attemptStartedAt >= Date.parse(test.end_time || '')) {
+      return NextResponse.json({ success: false, error: 'This attempt did not start during the assessment window.' }, { status: 403 });
+    }
+
+    const now = Date.now();
+    const hardDeadline = getAssessmentDeadline(attempt.started_at, test.duration_minutes, test.end_time!);
+    const submissionStatus = now >= hardDeadline ? 'auto_submitted' : 'submitted';
     const { data: assignedQuestionRows, error: assignedQuestionsError } = await supabase
       .from('test_questions')
       .select('question_id')
@@ -45,19 +75,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const finalPercentage = Math.round((totalScore / (maxScore || 100)) * 100);
 
-    // Record submission in Database
-    const attempt = await DatabaseService.submitTestAttempt({
-      test_id: testId,
-      student_id: student.id,
-      score: finalPercentage,
-      status: 'submitted',
-      submitted_at: new Date().toISOString(),
-    });
+    const { data: completedAttempt, error: updateAttemptError } = await supabase
+      .from('test_attempts')
+      .update({
+        score: finalPercentage,
+        status: submissionStatus,
+        submitted_at: new Date().toISOString(),
+      })
+      .eq('id', attemptId)
+      .eq('student_id', student.id)
+      .eq('status', 'in_progress')
+      .select('id')
+      .maybeSingle();
+    if (updateAttemptError) throw updateAttemptError;
+    if (!completedAttempt) {
+      return NextResponse.json({ success: false, error: 'This assessment attempt was already submitted.' }, { status: 409 });
+    }
 
     return NextResponse.json({
       success: true,
       score: finalPercentage,
-      attemptId: attempt.id,
+      attemptId: completedAttempt.id,
+      status: submissionStatus,
       evaluatedAnswers,
     });
   } catch (err: any) {

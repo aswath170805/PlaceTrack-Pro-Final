@@ -4,6 +4,7 @@ import { Question } from '@/lib/types';
 import { requireRole } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/server';
 import { assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
+import { formatAssessmentTimeIST, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
 
 // Fisher-Yates shuffle helper
 function shuffleArray<T>(array: T[]): T[] {
@@ -23,6 +24,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const test = tests.find((entry) => entry.id === testId);
     if (!test || !assessmentMatchesStudent(test, student)) {
       return NextResponse.json({ success: false, error: 'This assessment is not allocated to your department and academic year.' }, { status: 403 });
+    }
+    const windowStatus = getAssessmentWindowStatus(test);
+    if (windowStatus === 'unscheduled') {
+      return NextResponse.json({ success: false, error: 'This assessment does not have a valid start and end time.' }, { status: 409 });
+    }
+    if (windowStatus === 'upcoming') {
+      return NextResponse.json({ success: false, error: `This assessment opens at ${formatAssessmentTimeIST(test.start_time)}.` }, { status: 403 });
+    }
+    if (windowStatus === 'closed') {
+      return NextResponse.json({ success: false, error: 'The assessment window has ended.' }, { status: 410 });
     }
 
     const supabase = await createClient();

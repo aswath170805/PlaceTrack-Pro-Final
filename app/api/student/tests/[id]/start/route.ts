@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { DatabaseService } from '@/lib/dbService';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/supabase/auth';
-import { assessmentMatchesStudent } from '@/lib/assessmentTargeting';
+import { assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
+import { formatAssessmentTimeIST, getAssessmentDeadline, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -14,24 +15,69 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ success: false, error: 'This assessment is not allocated to your department and academic year.' }, { status: 403 });
     }
 
-    const attempt = await DatabaseService.submitTestAttempt({
-      test_id: assessmentId,
-      student_id: student.id,
-      student_name: student.full_name,
-      status: 'in_progress',
-      started_at: new Date().toISOString(),
-      score: 0,
-    });
+    const windowStatus = getAssessmentWindowStatus(test);
+    if (windowStatus === 'unscheduled') {
+      return NextResponse.json({ success: false, error: 'This assessment does not have a valid start and end time.' }, { status: 409 });
+    }
+    if (windowStatus === 'upcoming') {
+      return NextResponse.json({ success: false, error: `This assessment opens at ${formatAssessmentTimeIST(test.start_time)}.` }, { status: 403 });
+    }
+    if (windowStatus === 'closed') {
+      return NextResponse.json({ success: false, error: 'The assessment window has ended.' }, { status: 410 });
+    }
 
     const supabase = await createClient();
-    const { error: attendanceError } = await supabase.from('attendance_logs').insert({ student_id: student.id, entry_type: 'assessment_entry' });
-    if (attendanceError) throw attendanceError;
+    const { data: assignedRows, error: assignedError } = await supabase
+      .from('test_questions')
+      .select('question_id')
+      .eq('test_id', assessmentId);
+    if (assignedError) throw assignedError;
+    const assignedQuestionIds = new Set((assignedRows || []).map((row) => row.question_id));
+    const eligibleQuestions = (await DatabaseService.getQuestions())
+      .filter((question) => assignedQuestionIds.has(question.id))
+      .filter((question) => questionMatchesStudent(question, student.department, student.academic_year || student.year_of_study));
+    if (eligibleQuestions.length === 0) {
+      return NextResponse.json({ success: false, error: 'No questions are assigned to your department and year.' }, { status: 409 });
+    }
+
+    const { data: existingAttempt, error: existingAttemptError } = await supabase
+      .from('test_attempts')
+      .select('id, started_at')
+      .eq('test_id', assessmentId)
+      .eq('student_id', student.id)
+      .eq('status', 'in_progress')
+      .order('started_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (existingAttemptError) throw existingAttemptError;
+
+    let attempt = existingAttempt;
+    if (!attempt) {
+      const { data: newAttempt, error: createAttemptError } = await supabase
+        .from('test_attempts')
+        .insert({
+          test_id: assessmentId,
+          student_id: student.id,
+          status: 'in_progress',
+          started_at: new Date().toISOString(),
+          score: 0,
+        })
+        .select('id, started_at')
+        .single();
+      if (createAttemptError) throw createAttemptError;
+      attempt = newAttempt;
+    }
+
+    const serverNow = new Date().toISOString();
+    const deadlineAt = new Date(getAssessmentDeadline(attempt.started_at, test.duration_minutes, test.end_time!)).toISOString();
 
     return NextResponse.json({
       success: true,
       assessmentId,
       attemptId: attempt.id,
-      authorizedAt: new Date().toISOString(),
+      startedAt: attempt.started_at,
+      deadlineAt,
+      serverNow,
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: err.message === 'UNAUTHORIZED' ? 401 : 500 });

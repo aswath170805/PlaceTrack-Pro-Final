@@ -1,0 +1,2 @@
+ALTER TABLE public.tests
+  ADD COLUMN IF NOT EXISTS is_unified BOOLEAN NOT NULL DEFAULT false;
