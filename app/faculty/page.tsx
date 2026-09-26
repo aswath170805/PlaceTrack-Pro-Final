@@ -35,156 +35,6 @@ import {
   Tooltip,
   Legend
 } from 'recharts';
-import { PDFDownloadLink, Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
-
-// PDF Stylesheet for student assessment report
-const pdfStyles = StyleSheet.create({
-  page: {
-    padding: 36,
-    backgroundColor: '#ffffff',
-    fontFamily: 'Helvetica',
-  },
-  header: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#4f46e5',
-    paddingBottom: 12,
-    marginBottom: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#0f172a',
-  },
-  subtitle: {
-    fontSize: 9,
-    color: '#64748b',
-    marginTop: 4,
-    textTransform: 'uppercase',
-  },
-  scoreBadge: {
-    backgroundColor: '#e0e7ff',
-    padding: 8,
-    borderRadius: 8,
-    textAlign: 'center',
-  },
-  scoreText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#4338ca',
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    backgroundColor: '#f8fafc',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
-  },
-  gridItem: {
-    width: '50%',
-    marginBottom: 8,
-  },
-  label: {
-    fontSize: 8,
-    color: '#64748b',
-    textTransform: 'uppercase',
-    fontWeight: 'bold',
-  },
-  value: {
-    fontSize: 11,
-    color: '#0f172a',
-    fontWeight: 'bold',
-    marginTop: 2,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#1e1b4b',
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-    paddingBottom: 4,
-  },
-  commentBox: {
-    backgroundColor: '#eef2ff',
-    padding: 10,
-    borderRadius: 6,
-    marginBottom: 15,
-  },
-  commentText: {
-    fontSize: 10,
-    color: '#3730a3',
-    lineHeight: 1.4,
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 30,
-    left: 36,
-    right: 36,
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
-    paddingTop: 8,
-    textAlign: 'center',
-    fontSize: 8,
-    color: '#94a3b8',
-  }
-});
-
-// Single Student PDF Progress Document
-const StudentPerformancePdf = ({ attempt }: { attempt: TestAttempt }) => (
-  <Document>
-    <Page size="A4" style={pdfStyles.page}>
-      <View style={pdfStyles.header}>
-        <View>
-          <Text style={pdfStyles.title}>Assessment Attempt Record</Text>
-          <Text style={pdfStyles.subtitle}>PlaceTrack Pro Saved Attempt Data</Text>
-        </View>
-        <View style={pdfStyles.scoreBadge}>
-          <Text style={pdfStyles.scoreText}>{attempt.score}%</Text>
-          <Text style={{ fontSize: 7, color: '#4338ca' }}>Saved Score</Text>
-        </View>
-      </View>
-
-      <View style={pdfStyles.grid}>
-        <View style={pdfStyles.gridItem}>
-          <Text style={pdfStyles.label}>Student Full Name</Text>
-          <Text style={pdfStyles.value}>{attempt.student_name || `Student ${attempt.student_id}`}</Text>
-        </View>
-        <View style={pdfStyles.gridItem}>
-          <Text style={pdfStyles.label}>Assessment</Text>
-          <Text style={pdfStyles.value}>{attempt.test_title || `Assessment ${attempt.test_id}`}</Text>
-        </View>
-        <View style={pdfStyles.gridItem}>
-          <Text style={pdfStyles.label}>Attempt ID</Text>
-          <Text style={pdfStyles.value}>{attempt.id}</Text>
-        </View>
-        <View style={pdfStyles.gridItem}>
-          <Text style={pdfStyles.label}>Submission Date</Text>
-          <Text style={pdfStyles.value}>{new Date(attempt.submitted_at || attempt.started_at).toLocaleDateString()}</Text>
-        </View>
-        <View style={pdfStyles.gridItem}>
-          <Text style={pdfStyles.label}>Assessment Status</Text>
-          <Text style={pdfStyles.value}>{attempt.status.toUpperCase()}</Text>
-        </View>
-      </View>
-
-      <Text style={pdfStyles.sectionTitle}>Recorded Status</Text>
-      <View style={pdfStyles.commentBox}>
-        <Text style={pdfStyles.commentText}>
-          {`Attempt status: ${attempt.status}. This report contains saved attempt fields only.`}
-        </Text>
-      </View>
-
-      <Text style={pdfStyles.footer}>
-        PlaceTrack Pro • Assessment attempt record
-      </Text>
-    </Page>
-  </Document>
-);
-
 // Department Participation Colors
 const DEPT_COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
 
@@ -197,10 +47,8 @@ export default function FacultyDashboard() {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [attempts, setAttempts] = useState<TestAttempt[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [isMounted, setIsMounted] = useState<boolean>(false);
 
   useEffect(() => {
-    setIsMounted(true);
     async function loadFacultyData() {
       const t = await DatabaseService.getTests();
       const b = await DatabaseService.getBatches();
@@ -467,20 +315,13 @@ export default function FacultyDashboard() {
                       {att.submitted_at ? new Date(att.submitted_at).toLocaleDateString() : 'Not submitted'}
                     </td>
                     <td className="py-3.5 px-4 text-right">
-                      {isMounted ? (
-                        <PDFDownloadLink
-                          document={<StudentPerformancePdf attempt={att} />}
-                          fileName={`${(att.student_name || 'Student').replace(/\s+/g, '_')}_Progress_Audit.pdf`}
-                          className="inline-flex items-center px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs rounded-xl transition-all shadow-xs"
-                        >
-                          <Download className="w-3.5 h-3.5 mr-1" />
-                          Download PDF
-                        </PDFDownloadLink>
-                      ) : (
-                        <button className="px-3 py-1.5 bg-slate-100 text-slate-400 text-xs font-bold rounded-xl">
-                          Loading PDF...
-                        </button>
-                      )}
+                      <a
+                        href={`/api/faculty/attempts/${att.id}/report`}
+                        className="inline-flex items-center px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs rounded-xl transition-all shadow-xs"
+                      >
+                        <Download className="w-3.5 h-3.5 mr-1" />
+                        Download PDF
+                      </a>
                     </td>
                   </tr>
                 ))}
