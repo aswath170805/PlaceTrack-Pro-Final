@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { DatabaseService } from '@/lib/dbService';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/supabase/auth';
-import { assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
+import { assessmentAudienceMismatch, assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 import { formatAssessmentTimeIST, getAssessmentDeadline, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -11,8 +11,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const student = await requireRole(['student']);
 
     const test = (await DatabaseService.getTests()).find((entry) => entry.id === assessmentId);
-    if (!test || !assessmentMatchesStudent(test, student)) {
-      return NextResponse.json({ success: false, error: 'This assessment is not allocated to your department and academic year.' }, { status: 403 });
+    if (!test) {
+      return NextResponse.json({ success: false, error: 'Assessment was not found.' }, { status: 404 });
+    }
+    if (!assessmentMatchesStudent(test, student)) {
+      return NextResponse.json({ success: false, error: assessmentAudienceMismatch(test, student) }, { status: 403 });
     }
 
     const windowStatus = getAssessmentWindowStatus(test);

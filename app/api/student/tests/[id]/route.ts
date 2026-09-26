@@ -3,7 +3,7 @@ import { DatabaseService } from '@/lib/dbService';
 import { Question } from '@/lib/types';
 import { requireRole } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/server';
-import { assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
+import { assessmentAudienceMismatch, assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 import { formatAssessmentTimeIST, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
 
 // Fisher-Yates shuffle helper
@@ -22,8 +22,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const student = await requireRole(['student']);
     const tests = await DatabaseService.getTests();
     const test = tests.find((entry) => entry.id === testId);
-    if (!test || !assessmentMatchesStudent(test, student)) {
-      return NextResponse.json({ success: false, error: 'This assessment is not allocated to your department and academic year.' }, { status: 403 });
+    if (!test) {
+      return NextResponse.json({ success: false, error: 'Assessment was not found.' }, { status: 404 });
+    }
+    if (!assessmentMatchesStudent(test, student)) {
+      return NextResponse.json({ success: false, error: assessmentAudienceMismatch(test, student) }, { status: 403 });
     }
     const windowStatus = getAssessmentWindowStatus(test);
     if (windowStatus === 'unscheduled') {
