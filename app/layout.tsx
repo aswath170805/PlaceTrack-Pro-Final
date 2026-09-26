@@ -14,8 +14,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className="bg-slate-50 text-slate-900 antialiased selection:bg-blue-600 selection:text-white">
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning className="bg-slate-50 text-slate-900 antialiased selection:bg-blue-600 selection:text-white">
         <AuthProvider>
           <Navbar />
           <main>{children}</main>
