@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { assessmentAudienceMismatch, assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 import { formatAssessmentTimeIST, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
+import { insertAttendanceLog } from '@/lib/attendanceLogs';
 
 // Fisher-Yates shuffle helper
 function shuffleArray<T>(array: T[]): T[] {
@@ -55,8 +56,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ success: false, error: 'This assessment has no saved questions assigned yet.' }, { status: 404 });
     }
 
-    const { error: attendanceError } = await supabase.from('attendance_logs').insert({ student_id: student.id, entry_type: 'assessment_entry' });
-    if (attendanceError) throw attendanceError;
+    const attendanceError = await insertAttendanceLog(supabase, student.id, 'assessment_entry');
+    if (attendanceError) console.warn('Assessment attendance could not be recorded:', attendanceError.message);
 
     const { data: questionRows, error: questionsError } = await adminSupabase.from('questions').select('*');
     if (questionsError) throw questionsError;
