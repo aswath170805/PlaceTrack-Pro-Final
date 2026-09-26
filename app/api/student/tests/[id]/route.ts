@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DatabaseService } from '@/lib/dbService';
 import { Question } from '@/lib/types';
 import { requireRole } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/server';
@@ -20,8 +19,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   try {
     const { id: testId } = await params;
     const student = await requireRole(['student']);
-    const tests = await DatabaseService.getTests();
-    const test = tests.find((entry) => entry.id === testId);
+    const supabase = await createClient();
+    const { data: test, error: testError } = await supabase
+      .from('tests')
+      .select('*')
+      .eq('id', testId)
+      .maybeSingle();
+    if (testError) throw testError;
     if (!test) {
       return NextResponse.json({ success: false, error: 'Assessment was not found.' }, { status: 404 });
     }
@@ -39,7 +43,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ success: false, error: 'The assessment window has ended.' }, { status: 410 });
     }
 
-    const supabase = await createClient();
     const { data: testQuestionRows, error: testQuestionError } = await supabase
       .from('test_questions')
       .select('question_id')
@@ -53,7 +56,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { error: attendanceError } = await supabase.from('attendance_logs').insert({ student_id: student.id, entry_type: 'assessment_entry' });
     if (attendanceError) throw attendanceError;
 
-    const questions = (await DatabaseService.getQuestions())
+    const { data: questionRows, error: questionsError } = await supabase.from('questions').select('*');
+    if (questionsError) throw questionsError;
+    const questions = ((questionRows || []) as Question[])
       .filter((question) => questionMatchesStudent(question, student.department, student.academic_year || student.year_of_study))
       .filter((question) => assignedQuestionIds.has(question.id));
 

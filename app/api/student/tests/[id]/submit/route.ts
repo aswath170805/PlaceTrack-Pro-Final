@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DatabaseService } from '@/lib/dbService';
 import { requireRole } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/server';
 import { assessmentAudienceMismatch, assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 import { getAssessmentDeadline, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
+import type { Question } from '@/lib/types';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -15,7 +15,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ success: false, error: 'A valid attempt and answer set are required.' }, { status: 400 });
     }
 
-    const test = (await DatabaseService.getTests()).find((entry) => entry.id === testId);
+    const supabase = await createClient();
+    const { data: test, error: testError } = await supabase
+      .from('tests')
+      .select('*')
+      .eq('id', testId)
+      .maybeSingle();
+    if (testError) throw testError;
     if (!test) {
       return NextResponse.json({ success: false, error: 'Assessment was not found.' }, { status: 404 });
     }
@@ -30,7 +36,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ success: false, error: 'This assessment has not opened yet.' }, { status: 403 });
     }
 
-    const supabase = await createClient();
     const { data: attempt, error: attemptLookupError } = await supabase
       .from('test_attempts')
       .select('id, started_at, status')
@@ -56,7 +61,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .eq('test_id', testId);
     if (assignedQuestionsError) throw assignedQuestionsError;
     const assignedQuestionIds = new Set((assignedQuestionRows || []).map((row) => row.question_id));
-    const allQuestions = (await DatabaseService.getQuestions())
+    const { data: questionRows, error: questionsError } = await supabase.from('questions').select('*');
+    if (questionsError) throw questionsError;
+    const allQuestions = ((questionRows || []) as Question[])
       .filter((question) => questionMatchesStudent(question, student.department, student.academic_year || student.year_of_study))
       .filter((question) => assignedQuestionIds.has(question.id));
     if (allQuestions.length === 0) {

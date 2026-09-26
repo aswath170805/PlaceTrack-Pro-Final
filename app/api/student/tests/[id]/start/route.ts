@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DatabaseService } from '@/lib/dbService';
+import type { Question } from '@/lib/types';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/supabase/auth';
 import { assessmentAudienceMismatch, assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
@@ -9,8 +9,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const { id: assessmentId } = await params;
     const student = await requireRole(['student']);
-
-    const test = (await DatabaseService.getTests()).find((entry) => entry.id === assessmentId);
+    const supabase = await createClient();
+    const { data: test, error: testError } = await supabase
+      .from('tests')
+      .select('*')
+      .eq('id', assessmentId)
+      .maybeSingle();
+    if (testError) throw testError;
     if (!test) {
       return NextResponse.json({ success: false, error: 'Assessment was not found.' }, { status: 404 });
     }
@@ -29,14 +34,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ success: false, error: 'The assessment window has ended.' }, { status: 410 });
     }
 
-    const supabase = await createClient();
     const { data: assignedRows, error: assignedError } = await supabase
       .from('test_questions')
       .select('question_id')
       .eq('test_id', assessmentId);
     if (assignedError) throw assignedError;
     const assignedQuestionIds = new Set((assignedRows || []).map((row) => row.question_id));
-    const eligibleQuestions = (await DatabaseService.getQuestions())
+    const { data: questionRows, error: questionsError } = await supabase.from('questions').select('*');
+    if (questionsError) throw questionsError;
+    const eligibleQuestions = ((questionRows || []) as Question[])
       .filter((question) => assignedQuestionIds.has(question.id))
       .filter((question) => questionMatchesStudent(question, student.department, student.academic_year || student.year_of_study));
     if (eligibleQuestions.length === 0) {
