@@ -33,6 +33,11 @@ export async function POST(req: Request) {
     if (profileLookupError) throw profileLookupError;
     if (!profileBefore) return NextResponse.json({ success: false, error: 'The account profile was not found.' }, { status: 404 });
 
+    if (isApproved) {
+      const { error: emailConfirmationError } = await supabase.auth.admin.updateUserById(userId, { email_confirm: true });
+      if (emailConfirmationError) throw emailConfirmationError;
+    }
+
     // Update the profile first; only report approval if both records are confirmed.
     const { data: updatedProfile, error: profileError } = await supabase
       .from('profiles')
