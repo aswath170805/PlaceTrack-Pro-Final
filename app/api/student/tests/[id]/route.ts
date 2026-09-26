@@ -3,6 +3,7 @@ import { DatabaseService } from '@/lib/dbService';
 import { Question } from '@/lib/types';
 import { requireRole } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/server';
+import { assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 
 // Fisher-Yates shuffle helper
 function shuffleArray<T>(array: T[]): T[] {
@@ -18,12 +19,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   try {
     const { id: testId } = await params;
     const student = await requireRole(['student']);
-    const department = student.department;
-    const year = (student.academic_year || student.year_of_study || '').replace(/\s+Year$/i, '').toLowerCase();
     const tests = await DatabaseService.getTests();
     const test = tests.find((entry) => entry.id === testId);
-    const targetYear = (test?.target_year || '').replace(/\s+Year$/i, '').toLowerCase();
-    if (!test || test.target_department?.toLowerCase() !== department?.toLowerCase() || targetYear !== year) {
+    if (!test || !assessmentMatchesStudent(test, student)) {
       return NextResponse.json({ success: false, error: 'This assessment is not allocated to your department and academic year.' }, { status: 403 });
     }
 
@@ -41,7 +39,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { error: attendanceError } = await supabase.from('attendance_logs').insert({ student_id: student.id, entry_type: 'assessment_entry' });
     if (attendanceError) throw attendanceError;
 
-    const questions = (await DatabaseService.getQuestionsForStudent(department, year))
+    const questions = (await DatabaseService.getQuestions())
+      .filter((question) => questionMatchesStudent(question, student.department, student.academic_year || student.year_of_study))
       .filter((question) => assignedQuestionIds.has(question.id));
 
     // 1. Randomize Question Presentation Order per session

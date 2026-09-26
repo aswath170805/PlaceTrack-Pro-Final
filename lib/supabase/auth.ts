@@ -14,6 +14,6 @@ export async function getAuthenticatedProfile(): Promise<Profile | null> {
 export async function requireRole(roles: Profile['role'][]): Promise<Profile> {
   const profile = await getAuthenticatedProfile();
   if (!profile || !roles.includes(profile.role)) throw new Error('UNAUTHORIZED');
-  if (roles.includes('student') && profile.role === 'student' && profile.is_verified !== true) throw new Error('UNAUTHORIZED');
+  if ((profile.role === 'student' || profile.role === 'faculty') && profile.is_verified !== true) throw new Error('UNAUTHORIZED');
   return profile;
 }

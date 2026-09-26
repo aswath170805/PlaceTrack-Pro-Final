@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/authContext';
 import { DatabaseService } from '@/lib/dbService';
 import { Test, TestAttempt, TestAttempt as AttemptType } from '@/lib/types';
+import { assessmentMatchesStudent } from '@/lib/assessmentTargeting';
 import { 
   Play, 
   Clock, 
@@ -36,14 +37,7 @@ export default function StudentDashboard() {
   const userDept = user?.department || 'CSE';
   const userYear = (user?.academic_year || user?.year_of_study || '').replace(/\s+Year$/i, '').toLowerCase();
 
-  const isTestAllocated = (test: Test) => {
-    const deptMatch = !!test.target_department && test.target_department.toLowerCase() === userDept.toLowerCase();
-    const targetYear = (test.target_year || '').replace(/\s+Year$/i, '').toLowerCase();
-    const yearMatch = !!userYear && !!targetYear && targetYear === userYear;
-    return deptMatch && yearMatch;
-  };
-
-  const allocatedTests = tests.filter(isTestAllocated);
+  const allocatedTests = tests.filter((test) => user && assessmentMatchesStudent(test, user));
   const completedAttempts = attempts.filter((attempt) => attempt.status !== 'in_progress');
   const averageScore = completedAttempts.length
     ? Math.round(completedAttempts.reduce((total, attempt) => total + Number(attempt.score || 0), 0) / completedAttempts.length)
@@ -178,8 +172,6 @@ export default function StudentDashboard() {
                         )}
                       </div>
                       <div className="flex items-center space-x-4 text-xs text-slate-500">
-                        <span>Batch: <strong className="text-slate-700">{test.batch_name || `${test.target_department || 'General'} 2026`}</strong></span>
-                        <span>•</span>
                         <span>Duration: <strong className="text-slate-700">{test.duration_minutes} mins</strong></span>
                       </div>
                     </div>

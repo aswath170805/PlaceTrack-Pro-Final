@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DatabaseService } from '@/lib/dbService';
 import { requireRole } from '@/lib/supabase/auth';
+import { createClient } from '@/lib/supabase/server';
+import { assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -9,15 +11,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const body = await req.json();
     const { answers } = body;
 
-    const department = student.department || '';
-    const year = (student.academic_year || student.year_of_study || '').replace(/\s+Year$/i, '').toLowerCase();
     const test = (await DatabaseService.getTests()).find((entry) => entry.id === testId);
-    const testYear = (test?.target_year || '').replace(/\s+Year$/i, '').toLowerCase();
-    if (!test || test.target_department?.toLowerCase() !== department.toLowerCase() || testYear !== year) {
+    if (!test || !assessmentMatchesStudent(test, student)) {
       return NextResponse.json({ success: false, error: 'This assessment is not allocated to your department and academic year.' }, { status: 403 });
     }
 
-    const allQuestions = await DatabaseService.getQuestionsForStudent(department, year);
+    const supabase = await createClient();
+    const { data: assignedQuestionRows, error: assignedQuestionsError } = await supabase
+      .from('test_questions')
+      .select('question_id')
+      .eq('test_id', testId);
+    if (assignedQuestionsError) throw assignedQuestionsError;
+    const assignedQuestionIds = new Set((assignedQuestionRows || []).map((row) => row.question_id));
+    const allQuestions = (await DatabaseService.getQuestions())
+      .filter((question) => questionMatchesStudent(question, student.department, student.academic_year || student.year_of_study))
+      .filter((question) => assignedQuestionIds.has(question.id));
     if (allQuestions.length === 0) {
       return NextResponse.json({ success: false, error: 'No questions are routed to this assessment.' }, { status: 400 });
     }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { DatabaseService } from '@/lib/dbService';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/supabase/auth';
+import { assessmentMatchesStudent } from '@/lib/assessmentTargeting';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -9,9 +10,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const student = await requireRole(['student']);
 
     const test = (await DatabaseService.getTests()).find((entry) => entry.id === assessmentId);
-    const studentYear = (student.academic_year || student.year_of_study || '').replace(/\s+Year$/i, '').toLowerCase();
-    const testYear = (test?.target_year || '').replace(/\s+Year$/i, '').toLowerCase();
-    if (!test || test.target_department?.toLowerCase() !== student.department?.toLowerCase() || testYear !== studentYear) {
+    if (!test || !assessmentMatchesStudent(test, student)) {
       return NextResponse.json({ success: false, error: 'This assessment is not allocated to your department and academic year.' }, { status: 403 });
     }
 

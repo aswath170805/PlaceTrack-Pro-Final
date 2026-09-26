@@ -2,19 +2,18 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  Batch,
+import {
   QuestionBank,
   Test, 
   Question 
 } from '@/lib/types';
 import { DatabaseService } from '@/lib/dbService';
 import { useAuth } from '@/lib/authContext';
+import { questionMatchesAssessment } from '@/lib/assessmentTargeting';
 import { 
   FileCheck2, 
   ShieldAlert, 
   Clock, 
-  Users, 
   BookOpen, 
   CheckCircle2,
   ArrowLeft,
@@ -39,24 +38,19 @@ export default function CreateTestPage() {
 
   const [title, setTitle] = useState<string>('');
   const [type, setType] = useState<'daily_practice' | 'weekly_assessment' | 'custom'>('weekly_assessment');
-  const [batchId, setBatchId] = useState<string>('');
   const [duration, setDuration] = useState<number>(45);
   const [isProctored, setIsProctored] = useState<boolean>(true);
-  const [batches, setBatches] = useState<Batch[]>([]);
   const [questionBanks, setQuestionBanks] = useState<QuestionBank[]>([]);
-  const [targetDepartment, setTargetDepartment] = useState<string>('CSE');
-  const [targetYear, setTargetYear] = useState<string>('1st');
+  const [targetDepartment, setTargetDepartment] = useState<string>('All Departments');
+  const [targetYear, setTargetYear] = useState<string>('All Years');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([DatabaseService.getBatches(), DatabaseService.getQuestionBanks()])
-      .then(([loadedBatches, loadedBanks]) => {
-        setBatches(loadedBatches);
-        setQuestionBanks(loadedBanks);
-      })
-      .catch((error) => setErrorMessage(error instanceof Error ? error.message : 'Unable to load batches and question banks.'));
+    DatabaseService.getQuestionBanks()
+      .then(setQuestionBanks)
+      .catch((error) => setErrorMessage(error instanceof Error ? error.message : 'Unable to load question banks.'));
   }, []);
 
   // Sessions configuration
@@ -87,14 +81,13 @@ export default function CreateTestPage() {
       const availableQuestions = await DatabaseService.getQuestions();
       const selectedQuestionIds = availableQuestions
         .filter((question) => selectedBankIds.includes(question.bank_id))
-        .filter((question) => question.target_department?.toLowerCase() === targetDepartment.toLowerCase() && question.target_year?.replace(/\s+Year$/i, '') === targetYear)
+        .filter((question) => questionMatchesAssessment(question, targetDepartment, targetYear))
         .map((question) => question.id);
-      if (selectedQuestionIds.length === 0) throw new Error('Selected banks contain no questions routed to this department and year.');
+      if (selectedQuestionIds.length === 0) throw new Error('Selected banks contain no questions compatible with this department and year target.');
 
       const created = await DatabaseService.createTest({
         title,
         type,
-        batch_id: batchId || undefined,
         duration_minutes: duration,
         is_proctored: isProctored,
         created_by: user?.id || '',
@@ -198,22 +191,8 @@ export default function CreateTestPage() {
               </div>
             </div>
 
-            {/* Target Batch, Target Department, Target Year & Duration */}
+            {/* Target Department, Target Year & Duration */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Target Student Batch</label>
-                <select
-                  value={batchId}
-                  onChange={(e) => setBatchId(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
-                >
-                  <option value="">No batch</option>
-                  {batches.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-              </div>
-
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">Total Duration (Minutes)</label>
                 <input
@@ -234,6 +213,7 @@ export default function CreateTestPage() {
                   onChange={(e) => setTargetDepartment(e.target.value)}
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
                 >
+                  <option value="All Departments">All Departments</option>
                   <option value="CSE">CSE</option>
                   <option value="AI">AI</option>
                   <option value="EEE">EEE</option>
@@ -249,6 +229,7 @@ export default function CreateTestPage() {
                   onChange={(e) => setTargetYear(e.target.value)}
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
                 >
+                  <option value="All Years">All Years</option>
                   <option value="1st">1st</option>
                   <option value="2nd">2nd</option>
                   <option value="3rd">3rd</option>

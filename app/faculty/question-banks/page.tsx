@@ -94,8 +94,8 @@ export default function QuestionBanksPage() {
     setQText('');
     setQTopic(activeBank?.topic || 'General');
     setQDifficulty('medium');
-    setQDept(['CSE', 'AI', 'EEE', 'ECE', 'IT'].includes(activeBank?.target_department || '') ? activeBank!.target_department! : 'CSE');
-    setQYear(['1st', '2nd', '3rd', '4th'].includes(activeBank?.target_year || '') ? activeBank!.target_year! : '1st');
+    setQDept(['All Departments', 'CSE', 'AI', 'EEE', 'ECE', 'IT'].includes(activeBank?.target_department || '') ? activeBank!.target_department! : 'CSE');
+    setQYear(['All Years', '1st', '2nd', '3rd', '4th'].includes(activeBank?.target_year || '') ? activeBank!.target_year! : '1st');
     setMcqOptions(['Option A', 'Option B', 'Option C', 'Option D']);
     setMcqCorrect(0);
     setStarterCode('function solution() {\n  // Code here\n}');
@@ -112,8 +112,8 @@ export default function QuestionBanksPage() {
     setQText(q.content.questionText);
     setQTopic(q.topic);
     setQDifficulty(q.difficulty);
-    setQDept(['CSE', 'AI', 'EEE', 'ECE', 'IT'].includes(q.target_department || activeBank?.target_department || '') ? (q.target_department || activeBank?.target_department)! : 'CSE');
-    setQYear(['1st', '2nd', '3rd', '4th'].includes(q.target_year || activeBank?.target_year || '') ? (q.target_year || activeBank?.target_year)! : '1st');
+    setQDept(['All Departments', 'CSE', 'AI', 'EEE', 'ECE', 'IT'].includes(q.target_department || activeBank?.target_department || '') ? (q.target_department || activeBank?.target_department)! : 'CSE');
+    setQYear(['All Years', '1st', '2nd', '3rd', '4th'].includes(q.target_year || activeBank?.target_year || '') ? (q.target_year || activeBank?.target_year)! : '1st');
     if (q.type === 'mcq') {
       setMcqOptions(q.content.options || ['Option A', 'Option B', 'Option C', 'Option D']);
       setMcqCorrect(typeof q.content.correctAnswer === 'number' ? q.content.correctAnswer : 0);
@@ -453,6 +453,7 @@ export default function QuestionBanksPage() {
                   onChange={(e) => setNewBankDept(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                 >
+                  <option value="All Departments">All Departments</option>
                   <option value="CSE">CSE</option>
                   <option value="AI">AI</option>
                   <option value="EEE">EEE</option>
@@ -467,6 +468,7 @@ export default function QuestionBanksPage() {
                   onChange={(e) => setNewBankYear(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                 >
+                  <option value="All Years">All Years</option>
                   <option value="1st">1st</option>
                   <option value="2nd">2nd</option>
                   <option value="3rd">3rd</option>
@@ -547,6 +549,7 @@ export default function QuestionBanksPage() {
                   onChange={(e) => setQDept(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                 >
+                  <option value="All Departments">All Departments</option>
                   <option value="CSE">CSE</option>
                   <option value="AI">AI</option>
                   <option value="EEE">EEE</option>
@@ -561,6 +564,7 @@ export default function QuestionBanksPage() {
                   onChange={(e) => setQYear(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                 >
+                  <option value="All Years">All Years</option>
                   <option value="1st">1st</option>
                   <option value="2nd">2nd</option>
                   <option value="3rd">3rd</option>
