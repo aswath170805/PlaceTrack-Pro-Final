@@ -6,14 +6,18 @@ import { useAuth } from '@/lib/authContext';
 import { Clock, LogOut, Lock } from 'lucide-react';
 
 export default function StudentLayoutGuard({ children }: { children: React.ReactNode }) {
-  const { user, role, logout } = useAuth();
+  const { user, role, logout, isSessionReady } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!user) {
+    if (isSessionReady && !user) {
       router.replace('/login');
     }
-  }, [user, router]);
+  }, [isSessionReady, user, router]);
+
+  if (!isSessionReady) {
+    return null;
+  }
 
   if (!user) {
     return null;

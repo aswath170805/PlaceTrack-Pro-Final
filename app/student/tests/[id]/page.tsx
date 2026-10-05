@@ -80,6 +80,7 @@ export default function TestEnvironment() {
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [isSaved, setIsSaved] = useState<boolean>(true);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
+  const [identityReady, setIdentityReady] = useState<boolean>(false);
 
   // LeetCode UI State
   const [activeTab, setActiveTab] = useState<'description' | 'ai' | 'results'>('description');
@@ -186,6 +187,24 @@ export default function TestEnvironment() {
     setIsSaved(false);
     setTimeout(() => setIsSaved(true), 400);
   };
+
+  useEffect(() => {
+    if (!attemptId || !identityReady || !Object.keys(answers).length) return;
+    const timeout = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/student/tests/${testId}/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attemptId, answers }),
+        });
+        if (!response.ok) throw new Error('Answer save failed.');
+        setIsSaved(true);
+      } catch {
+        setIsSaved(false);
+      }
+    }, 500);
+    return () => window.clearTimeout(timeout);
+  }, [answers, attemptId, identityReady, testId]);
 
   // Safe Execution Engine for LeetCode test cases
   const runCodeExecution = async () => {
@@ -298,20 +317,15 @@ export default function TestEnvironment() {
   };
 
   // Submit Test Handler
-  const handleSubmitTest = async (force = false) => {
+  const handleSubmitTest = async (force = false, submissionReason?: string, warningCount = 0) => {
     if (isSubmitting || !attemptId) return;
-    if (!force && questions.some((question) => question.type === 'coding' && codeCaseResults[question.id] !== true)) {
-      setSubmitError('Run and pass the public test cases for each coding question before submitting.');
-      setShowConfirmModal(true);
-      return;
-    }
 
     setIsSubmitting(true);
     try {
       const response = await fetch(`/api/student/tests/${testId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers, attemptId }),
+        body: JSON.stringify({ answers, attemptId, warningCount, submissionReason: submissionReason || (force ? 'Automatic assessment submission' : 'Student submitted assessment') }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || 'Unable to submit this assessment.');
@@ -751,8 +765,13 @@ export default function TestEnvironment() {
 
       {/* Browser integrity event monitor */}
       <ProctoringMonitor
-        attemptId={test.id}
+        attemptId={attemptId || ''}
+        testId={test.id}
         isProctored={test.is_proctored}
+        onAutoSubmit={(reason, warningCount) => {
+          void handleSubmitTest(true, reason, warningCount);
+        }}
+        onIdentityReady={() => setIdentityReady(true)}
       />
 
       {/* Confirmation Submit Modal */}

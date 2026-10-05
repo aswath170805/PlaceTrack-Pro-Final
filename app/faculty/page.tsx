@@ -302,10 +302,10 @@ export default function FacultyDashboard() {
                       </span>
                     </td>
                     <td className="py-3.5 px-4">
-                      {att.flag_count && att.flag_count > 0 ? (
+                      {(att.flag_count || att.status === 'flagged') ? (
                         <span className="inline-flex items-center text-[10px] font-bold bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md border border-amber-200">
                           <ShieldAlert className="w-3 h-3 mr-1" />
-                          {att.flag_count} Flagged
+                          {att.flag_count || 0} Flagged
                         </span>
                       ) : (
                         <span className="text-slate-400 font-medium">Not tracked</span>

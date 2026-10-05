@@ -6,16 +6,16 @@ import { useAuth } from '@/lib/authContext';
 import { ShieldAlert } from 'lucide-react';
 
 export default function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
-  const { user, role } = useAuth();
+  const { user, role, isSessionReady } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!user || role !== 'admin') {
+    if (isSessionReady && (!user || role !== 'admin')) {
       router.replace('/login');
     }
-  }, [user, role, router]);
+  }, [isSessionReady, user, role, router]);
 
-  if (!user || role !== 'admin') {
+  if (!isSessionReady || !user || role !== 'admin') {
     return null;
   }
 

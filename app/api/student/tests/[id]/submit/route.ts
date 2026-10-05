@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRole } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
 import { assessmentAudienceMismatch, assessmentMatchesStudent, questionMatchesStudent } from '@/lib/assessmentTargeting';
 import { getAssessmentDeadline, getAssessmentWindowStatus } from '@/lib/assessmentSchedule';
 import type { Question } from '@/lib/types';
@@ -11,14 +10,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id: testId } = await params;
     const student = await requireRole(['student']);
     const body = await req.json();
-    const { answers, attemptId } = body;
+    const { answers, attemptId, submissionReason, warningCount } = body;
     if (typeof attemptId !== 'string' || !attemptId || !answers || typeof answers !== 'object' || Array.isArray(answers)) {
       return NextResponse.json({ success: false, error: 'A valid attempt and answer set are required.' }, { status: 400 });
     }
 
     const supabase = await createClient();
-    const adminSupabase = createAdminClient();
-    const { data: test, error: testError } = await adminSupabase
+    const { data: test, error: testError } = await supabase
       .from('tests')
       .select('*')
       .eq('id', testId)
@@ -56,14 +54,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const now = Date.now();
     const hardDeadline = getAssessmentDeadline(attempt.started_at, test.duration_minutes, test.end_time!);
-    const submissionStatus = now >= hardDeadline ? 'auto_submitted' : 'submitted';
-    const { data: assignedQuestionRows, error: assignedQuestionsError } = await adminSupabase
+    const isProctoringViolation = typeof submissionReason === 'string' && /proctor|phone|people|window|fullscreen|clipboard|network|AI/i.test(submissionReason);
+    const submissionStatus = isProctoringViolation ? 'flagged' : now >= hardDeadline ? 'auto_submitted' : 'submitted';
+    if (isProctoringViolation) {
+      const { error: eventError } = await supabase.from('tampering_logs').insert({
+        student_id: student.id,
+        event_type: 'window_defocus',
+        metadata: {
+          record_type: 'automatic_submission',
+          attemptId,
+          reason: submissionReason.slice(0, 160),
+          warningCount: Number.isInteger(warningCount) ? Math.max(0, warningCount) : 0,
+        },
+      });
+      if (eventError) throw eventError;
+    }
+    const { data: assignedQuestionRows, error: assignedQuestionsError } = await supabase
       .from('test_questions')
       .select('question_id')
       .eq('test_id', testId);
     if (assignedQuestionsError) throw assignedQuestionsError;
     const assignedQuestionIds = new Set((assignedQuestionRows || []).map((row) => row.question_id));
-    const { data: questionRows, error: questionsError } = await adminSupabase.from('questions').select('*');
+    const { data: questionRows, error: questionsError } = await supabase.from('questions').select('*');
     if (questionsError) throw questionsError;
     const allQuestions = ((questionRows || []) as Question[])
       .filter((question) => questionMatchesStudent(question, student.department, student.academic_year || student.year_of_study))

@@ -135,7 +135,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { success: true, role: authenticatedRole, isVerified };
     } catch (e: any) {
       setIsLoading(false);
-      return { success: false, error: e?.message || 'Invalid credentials.' };
+      const message = String(e?.message || '');
+      if (/failed to fetch|networkerror|load failed/i.test(message)) {
+        return { success: false, error: 'Unable to reach Supabase. Verify .env.local contains the correct Supabase URL and anon key, then restart the server.' };
+      }
+      return { success: false, error: message || 'Invalid credentials.' };
     }
   };
 
